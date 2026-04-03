@@ -5,7 +5,6 @@ Terminal display utilities — rich-powered CLI formatting.
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.text import Text
 from rich.theme import Theme
 
 _THEME = Theme({
@@ -27,7 +26,6 @@ def get_console() -> Console:
 # ── Banner ─────────────────────────────────────────────────────────────
 
 def print_banner() -> None:
-    # HF yellow: rgb(255, 200, 50) — warm gold matching the brand
     Y = "\033[38;2;255;200;50m"  # HF yellow
     D = "\033[38;2;180;140;40m"  # dimmer gold for accents
     R = "\033[0m"
@@ -56,13 +54,69 @@ def print_tool_call(tool_name: str, args_preview: str) -> None:
 
 def print_tool_output(output: str, success: bool, truncate: bool = True) -> None:
     if truncate:
-        output = _truncate(output, max_lines=6)
+        output = _truncate(output, max_lines=10)
     style = "tool.ok" if success else "tool.fail"
     _console.print(f"  [{style}]{output}[/{style}]")
 
 
+class SubAgentDisplay:
+    """Rolling 3-line display showing the last 3 sub-agent tool calls, updated in-place."""
+
+    _MAX_VISIBLE = 3
+
+    def __init__(self):
+        self._calls: list[str] = []
+        self._lines_on_screen = 0
+
+    def update(self, tool_desc: str) -> None:
+        """Add a tool call and redraw the rolling display."""
+        self._calls.append(tool_desc)
+        visible = self._calls[-self._MAX_VISIBLE:]
+        self._redraw(visible)
+
+    def clear(self) -> None:
+        """Erase the display and reset state."""
+        if self._lines_on_screen > 0:
+            # Move up and clear each line we drew
+            f = _console.file
+            for _ in range(self._lines_on_screen):
+                f.write("\033[A\033[K")
+            f.flush()
+        self._lines_on_screen = 0
+        self._calls = []
+
+    def _redraw(self, visible: list[str]) -> None:
+        f = _console.file
+        # Erase previous lines
+        if self._lines_on_screen > 0:
+            for _ in range(self._lines_on_screen):
+                f.write("\033[A\033[K")
+        # Draw new lines
+        for i, desc in enumerate(visible):
+            dim = i < len(visible) - 1  # older calls are dimmer
+            if dim:
+                f.write(f"  \033[2m  {desc}\033[0m\n")
+            else:
+                f.write(f"  \033[36m▸ {desc}\033[0m\n")
+        f.flush()
+        self._lines_on_screen = len(visible)
+
+
+_subagent_display = SubAgentDisplay()
+
+
 def print_tool_log(tool: str, log: str) -> None:
-    _console.print(f"  [dim]{tool}:[/dim] [dim]{log}[/dim]")
+    """Handle tool log events — sub-agent calls get the rolling display."""
+    if tool == "research":
+        if log == "Starting research sub-agent...":
+            _subagent_display.clear()
+            _console.print(f"  [tool.name]▸ research[/tool.name]")
+        elif log == "Research complete.":
+            _subagent_display.clear()
+        else:
+            _subagent_display.update(log)
+    else:
+        _console.print(f"  [dim]{tool}: {log}[/dim]")
 
 
 # ── Messages ───────────────────────────────────────────────────────────
