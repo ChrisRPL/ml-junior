@@ -1,22 +1,3 @@
----
-title: HF Agent
-emoji: 🤖
-colorFrom: blue
-colorTo: purple
-sdk: docker
-app_port: 7860
-hf_oauth: true
-hf_oauth_expiration_minutes: 43200
-hf_oauth_scopes:
-  - read-repos
-  - write-repos
-  - contribute-repos
-  - manage-repos
-  - inference-api
-  - jobs
-  - write-discussions
----
-
 # HF Agent
 
 An MLE agent CLI with MCP (Model Context Protocol) integration and built-in tool support.
