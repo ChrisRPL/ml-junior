@@ -271,7 +271,7 @@ export default function WelcomeScreen() {
   const joinOrgStatus: StepStatus = isOrgMember ? 'completed' : isAuthenticated ? 'active' : 'locked';
   const startStatus: StepStatus = isAuthenticated && isOrgMember ? 'active' : 'locked';
 
-  // Space URL for iframe "Open HF Agent" step
+  // Space URL for iframe "Open ML Agent" step
   const spaceHost =
     typeof window !== 'undefined'
       ? window.location.hostname.includes('.hf.space')
@@ -295,8 +295,8 @@ export default function WelcomeScreen() {
       {/* Logo */}
       <Box
         component="img"
-        src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg"
-        alt="Hugging Face"
+        src="/smolagents.webp"
+        alt="smolagents"
         sx={{ width: 80, height: 80, mb: 2.5, display: 'block' }}
       />
 
@@ -311,7 +311,7 @@ export default function WelcomeScreen() {
           fontSize: { xs: '1.8rem', md: '2.4rem' },
         }}
       >
-        HF Agent
+        ML Agent
       </Typography>
 
       {/* Description */}
@@ -328,9 +328,7 @@ export default function WelcomeScreen() {
           '& strong': { color: 'var(--text)', fontWeight: 600 },
         }}
       >
-        A general-purpose AI agent for <strong>machine learning engineering</strong>.
-        It browses <strong>Hugging Face docs</strong>, manages <strong>repos</strong>,
-        launches <strong>training jobs</strong>, and explores <strong>datasets</strong>.
+        Your <strong>ML intern</strong>. It reads <strong>papers</strong>, finds <strong>datasets</strong>, trains <strong>models</strong>, and iterates until the numbers go up. Instructions in. Trained model out.
       </Typography>
 
       {/* ── Checklist ──────────────────────────────────────────── */}
@@ -372,11 +370,11 @@ export default function WelcomeScreen() {
             />
             <ChecklistStep
               stepNumber={2}
-              title="Open HF Agent"
+              title="Open ML Agent"
               description="Open the agent in a full browser tab to get started."
               status={isOrgMember ? 'active' : 'locked'}
               lockedReason="Join the organization first."
-              actionLabel="Open HF Agent"
+              actionLabel="Open ML Agent"
               actionIcon={<OpenInNewIcon sx={{ fontSize: 16 }} />}
               actionHref={spaceHost}
               isLast

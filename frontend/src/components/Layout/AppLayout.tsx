@@ -231,8 +231,8 @@ export default function AppLayout() {
           <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.75 }}>
             <Box
               component="img"
-              src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg"
-              alt="HF"
+              src="/smolagents.webp"
+              alt="smolagents"
               sx={{ width: { xs: 20, md: 22 }, height: { xs: 20, md: 22 } }}
             />
             <Typography
@@ -244,7 +244,7 @@ export default function AppLayout() {
                 fontSize: { xs: '0.88rem', md: '0.95rem' },
               }}
             >
-              HF Agent
+              ML Agent
             </Typography>
           </Box>
 
