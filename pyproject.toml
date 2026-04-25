@@ -60,3 +60,13 @@ include = ["agent*"]
 
 [tool.uv]
 package = true
+
+[tool.pytest.ini_options]
+pythonpath = [
+    ".",
+    "backend",
+]
+testpaths = ["tests"]
+markers = [
+    "asyncio: run coroutine tests with the repository pytest harness",
+]
