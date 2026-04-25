@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import socket
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -22,6 +23,30 @@ for path in (PROJECT_ROOT, BACKEND_DIR):
     path_str = str(path)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "allow_network: permit real socket connections for an explicitly networked test",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _block_network_calls(monkeypatch, request):
+    """Block accidental network sockets in the offline Phase 0 suite."""
+
+    if request.node.get_closest_marker("allow_network"):
+        return
+
+    def blocked_connect(*_args, **_kwargs):
+        raise AssertionError(
+            "Network access is disabled in tests. Mark the test with "
+            "@pytest.mark.allow_network only for explicit network smoke tests."
+        )
+
+    monkeypatch.setattr(socket.socket, "connect", blocked_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", blocked_connect)
 
 
 class FakeToolRouter:

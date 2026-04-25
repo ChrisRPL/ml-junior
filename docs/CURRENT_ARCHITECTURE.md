@@ -97,6 +97,10 @@ Current limitations:
 - Tool availability can change at startup depending on network, MCP, and
   OpenAPI initialization.
 - Approval policy is implemented separately from the router.
+- MCP tools can currently overwrite built-in tools whose names are not in
+  `NOT_ALLOWED_TOOL_NAMES`; for example, an MCP tool named `sandbox_create`
+  replaces the built-in registration. This is current behavior, not a target
+  security property.
 - Tool result conversion supports text and placeholder descriptions for images
   or embedded resources.
 
@@ -147,6 +151,80 @@ Current limitations:
 - `/api/events/{session_id}` currently does not enforce `is_processing` despite
   the docstring saying it is for in-progress sessions.
 
+## Current Event List
+
+Current agent/backend events observed in code:
+
+- `ready`: session loop initialized.
+- `processing`: a user input turn started.
+- `assistant_chunk`: streamed assistant content delta.
+- `assistant_message`: non-streaming assistant content.
+- `assistant_stream_end`: streaming assistant output ended.
+- `tool_call`: tool execution was requested.
+- `tool_output`: tool execution produced an output and success flag.
+- `tool_log`: tool/system log line.
+- `tool_state_change`: approval/runtime state change for an existing tool call.
+- `approval_required`: one or more tool calls require user approval.
+- `plan_update`: plan tool emitted a full todo list.
+- `compacted`: context compaction changed token usage.
+- `undo_complete`: undo operation completed.
+- `interrupted`: running turn/tool was interrupted.
+- `turn_complete`: turn reached a normal terminal state.
+- `error`: route/session/loop surfaced an error.
+- `shutdown`: session shutdown completed.
+
+Terminal SSE events:
+
+- `turn_complete`
+- `approval_required`
+- `error`
+- `interrupted`
+- `shutdown`
+
+## Current API And Command List
+
+Backend routes:
+
+- `GET /api`: API root.
+- `GET /api/health`: process health check.
+- `GET /api/health/llm`: network/API-key-dependent LLM health probe.
+- `GET /api/config/model`: current and available models.
+- `POST /api/title`: short title generation through an LLM call.
+- `POST /api/session`: create session.
+- `POST /api/session/restore-summary`: create session from browser-cached
+  message summary.
+- `GET /api/session/{session_id}`: session metadata.
+- `POST /api/session/{session_id}/model`: switch session model.
+- `GET /api/user/quota`: Claude quota state.
+- `GET /api/sessions`: list accessible sessions.
+- `DELETE /api/session/{session_id}`: delete session.
+- `POST /api/submit`: enqueue user input.
+- `POST /api/approve`: enqueue approval decisions.
+- `POST /api/chat/{session_id}`: submit text or approvals and stream same-turn
+  SSE.
+- `GET /api/events/{session_id}`: subscribe to future events for a session.
+- `POST /api/interrupt/{session_id}`: signal cancellation.
+- `GET /api/session/{session_id}/messages`: in-memory message history.
+- `POST /api/undo/{session_id}`: enqueue undo.
+- `POST /api/truncate/{session_id}`: truncate before a user message.
+- `POST /api/compact/{session_id}`: enqueue compaction.
+- `POST /api/shutdown/{session_id}`: enqueue shutdown.
+
+Current CLI slash commands:
+
+- `/help`
+- `/undo`
+- `/compact`
+- `/model [id]`
+- `/effort [minimal|low|medium|high|xhigh|max|off]`
+- `/yolo`
+- `/status`
+- `/quit` and `/exit`
+
+Headless CLI:
+
+- `ml-intern "prompt text"` runs one yolo-mode turn and exits.
+
 ## Session Manager
 
 Current behavior:
@@ -182,14 +260,13 @@ Current behavior:
 - Backend-created sessions use sandbox mode by default. Sandbox mode exposes
   `sandbox_create`, `bash`, `read`, `write`, and `edit` backed by a Hugging Face
   Space sandbox.
-- Current sandbox operation handlers require an active sandbox and return
-  "No sandbox running. Call sandbox_create first to start one." if none exists.
+- Current sandbox operation handlers attempt to auto-create a CPU sandbox when
+  no active sandbox exists, but this still requires session context, an HF
+  token, and network/HF API access. `sandbox_create` remains the explicit,
+  approval-gated sandbox creation tool.
 
 Current limitations:
 
-- `agent/tools/sandbox_tool.py` has a file header saying sandbox operations
-  auto-create a CPU sandbox, but the current handler code requires explicit
-  `sandbox_create`. Treat explicit sandbox creation as the implemented behavior.
 - Sandbox creation and operation require HF token/network access.
 - Local tool read-before-write/edit protection is process-local memory only.
 

@@ -27,3 +27,7 @@ It provides:
 
 Phase 0 tests must not make network calls. Mock LLM, Hugging Face, MCP, and
 tool execution boundaries.
+
+The harness blocks socket connections by default. If a future test is an
+intentional network smoke, mark it with `@pytest.mark.allow_network` and keep it
+out of the default offline gate.

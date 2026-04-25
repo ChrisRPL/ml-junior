@@ -8,9 +8,11 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 import pytest
+from fastapi import HTTPException
 
 import session_manager as session_module
 from agent.core.session import Event
+import routes.agent as agent_routes
 from routes.agent import _sse_response
 
 
@@ -68,6 +70,68 @@ class FakeSession:
     @property
     def is_cancelled(self) -> bool:
         return self._cancelled
+
+
+class FakeRequest:
+    def __init__(self, body: dict[str, Any]):
+        self._body = body
+
+    async def json(self) -> dict[str, Any]:
+        return self._body
+
+
+class RouteBroadcaster:
+    def __init__(self) -> None:
+        self.subscribed = False
+        self.unsubscribed: list[int] = []
+        self.queues: dict[int, asyncio.Queue] = {}
+        self._next_id = 0
+
+    def subscribe(self) -> tuple[int, asyncio.Queue]:
+        self.subscribed = True
+        self._next_id += 1
+        queue: asyncio.Queue = asyncio.Queue()
+        self.queues[self._next_id] = queue
+        return self._next_id, queue
+
+    def unsubscribe(self, sub_id: int) -> None:
+        self.unsubscribed.append(sub_id)
+
+
+class RouteSessionManager:
+    def __init__(self, broadcaster: RouteBroadcaster):
+        self.broadcaster = broadcaster
+        self.sessions = {
+            "session-a": SimpleNamespace(
+                is_active=True,
+                broadcaster=broadcaster,
+            )
+        }
+        self.user_inputs: list[tuple[str, str]] = []
+        self.approvals: list[tuple[str, list[dict[str, Any]]]] = []
+
+    async def submit_user_input(self, session_id: str, text: str) -> bool:
+        assert self.broadcaster.subscribed is True
+        self.user_inputs.append((session_id, text))
+        queue = self.broadcaster.queues[1]
+        await queue.put({"event_type": "turn_complete", "data": {"text": text}})
+        return True
+
+    async def submit_approval(
+        self, session_id: str, approvals: list[dict[str, Any]]
+    ) -> bool:
+        assert self.broadcaster.subscribed is True
+        self.approvals.append((session_id, approvals))
+        queue = self.broadcaster.queues[1]
+        await queue.put(
+            {"event_type": "approval_required", "data": {"approved": approvals}}
+        )
+        return True
+
+
+def _decode_sse_chunk(chunk: str | bytes) -> dict[str, Any]:
+    text = chunk.decode() if isinstance(chunk, bytes) else chunk
+    return json.loads(text.removeprefix("data: ").strip())
 
 
 @pytest.fixture
@@ -183,6 +247,126 @@ async def test_sse_response_closes_and_unsubscribes_on_terminal_event():
     }
     assert broadcaster.unsubscribed == [7]
     assert event_queue.qsize() == 1
+
+
+async def test_chat_sse_text_route_subscribes_before_submit_and_closes(
+    monkeypatch,
+):
+    broadcaster = RouteBroadcaster()
+    fake_manager = RouteSessionManager(broadcaster)
+    quota_calls: list[str] = []
+
+    async def fake_quota(_user, _agent_session):
+        quota_calls.append("called")
+
+    monkeypatch.setattr(agent_routes, "session_manager", fake_manager)
+    monkeypatch.setattr(agent_routes, "_check_session_access", lambda *_args: None)
+    monkeypatch.setattr(agent_routes, "_enforce_claude_quota", fake_quota)
+
+    response = await agent_routes.chat_sse(
+        "session-a",
+        FakeRequest({"text": "hello"}),
+        {"user_id": "dev"},
+    )
+
+    chunks = [
+        _decode_sse_chunk(chunk)
+        async for chunk in response.body_iterator
+    ]
+
+    assert quota_calls == ["called"]
+    assert fake_manager.user_inputs == [("session-a", "hello")]
+    assert fake_manager.approvals == []
+    assert chunks == [{"event_type": "turn_complete", "data": {"text": "hello"}}]
+    assert broadcaster.unsubscribed == [1]
+
+
+async def test_chat_sse_approvals_route_formats_and_skips_quota(monkeypatch):
+    broadcaster = RouteBroadcaster()
+    fake_manager = RouteSessionManager(broadcaster)
+
+    async def fail_if_called(_user, _agent_session):
+        raise AssertionError("approval submission should not charge quota")
+
+    monkeypatch.setattr(agent_routes, "session_manager", fake_manager)
+    monkeypatch.setattr(agent_routes, "_check_session_access", lambda *_args: None)
+    monkeypatch.setattr(agent_routes, "_enforce_claude_quota", fail_if_called)
+
+    response = await agent_routes.chat_sse(
+        "session-a",
+        FakeRequest(
+            {
+                "approvals": [
+                    {
+                        "tool_call_id": "tc_1",
+                        "approved": True,
+                        "feedback": "ok",
+                        "edited_script": "print('edited')",
+                    }
+                ]
+            }
+        ),
+        {"user_id": "dev"},
+    )
+
+    chunks = [
+        _decode_sse_chunk(chunk)
+        async for chunk in response.body_iterator
+    ]
+
+    assert fake_manager.user_inputs == []
+    assert fake_manager.approvals == [
+        (
+            "session-a",
+            [
+                {
+                    "tool_call_id": "tc_1",
+                    "approved": True,
+                    "feedback": "ok",
+                    "edited_script": "print('edited')",
+                }
+            ],
+        )
+    ]
+    assert chunks == [
+        {
+            "event_type": "approval_required",
+            "data": {
+                "approved": [
+                    {
+                        "tool_call_id": "tc_1",
+                        "approved": True,
+                        "feedback": "ok",
+                        "edited_script": "print('edited')",
+                    }
+                ]
+            },
+        }
+    ]
+    assert broadcaster.unsubscribed == [1]
+
+
+async def test_chat_sse_quota_error_unsubscribes_before_raising(monkeypatch):
+    broadcaster = RouteBroadcaster()
+    fake_manager = RouteSessionManager(broadcaster)
+
+    async def fail_quota(_user, _agent_session):
+        raise HTTPException(status_code=429, detail="quota")
+
+    monkeypatch.setattr(agent_routes, "session_manager", fake_manager)
+    monkeypatch.setattr(agent_routes, "_check_session_access", lambda *_args: None)
+    monkeypatch.setattr(agent_routes, "_enforce_claude_quota", fail_quota)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_routes.chat_sse(
+            "session-a",
+            FakeRequest({"text": "hello"}),
+            {"user_id": "dev"},
+        )
+
+    assert exc_info.value.status_code == 429
+    assert fake_manager.user_inputs == []
+    assert broadcaster.unsubscribed == [1]
 
 
 async def test_interrupt_sets_session_cancellation(manager):

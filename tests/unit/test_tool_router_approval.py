@@ -183,6 +183,32 @@ async def test_call_tool_routes_registered_handler_and_preserves_return_contract
     assert calls == [({"value": 1}, session, "tc_1")]
 
 
+async def test_call_tool_routes_actual_plan_tool_and_emits_plan_update():
+    events: list[Any] = []
+
+    class FakeSession:
+        async def send_event(self, event: Any) -> None:
+            events.append(event)
+
+    router = ToolRouter({})
+    todos = [
+        {"id": "1", "content": "Write characterization test", "status": "completed"}
+    ]
+
+    output, success = await router.call_tool(
+        "plan_tool",
+        {"todos": todos},
+        session=FakeSession(),
+        tool_call_id="tc_plan",
+    )
+
+    assert success is True
+    assert "Write characterization test" in output
+    assert [(event.event_type, event.data) for event in events] == [
+        ("plan_update", {"plan": todos})
+    ]
+
+
 async def test_call_tool_unknown_without_initialized_mcp_returns_current_error():
     router = ToolRouter({})
 
