@@ -118,8 +118,19 @@ class Session:
         """Send event back to client and log to trajectory"""
         envelope = self._envelope_event(event)
         await self.event_queue.put(envelope)
+        self._log_event(envelope)
 
-        # Log event to trajectory
+    def send_event_nowait(self, event: Event | AgentEvent) -> None:
+        """Queue an event synchronously using the same envelope/log path.
+
+        Use from callbacks scheduled onto the event loop with
+        ``loop.call_soon_threadsafe`` when the producer itself is not async.
+        """
+        envelope = self._envelope_event(event)
+        self.event_queue.put_nowait(envelope)
+        self._log_event(envelope)
+
+    def _log_event(self, envelope: AgentEvent) -> None:
         self.logged_events.append(
             {
                 "timestamp": envelope.timestamp.isoformat(),

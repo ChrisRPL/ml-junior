@@ -80,6 +80,33 @@ async def test_logged_events_remain_legacy_trajectory_shape(
     assert "sequence" not in session.logged_events[0]
 
 
+async def test_send_event_nowait_uses_same_envelope_and_log_path(
+    event_queue,
+    event_collector,
+    fake_tool_router,
+    test_config,
+):
+    session = make_session(event_queue, test_config, fake_tool_router)
+
+    session.send_event_nowait(Event("tool_log", {"tool": "sandbox", "log": "ready"}))
+
+    [event] = await event_collector(event_queue)
+    assert isinstance(event, AgentEvent)
+    assert event.session_id == session.session_id
+    assert event.sequence == 1
+    assert event.to_legacy_sse() == {
+        "event_type": "tool_log",
+        "data": {"tool": "sandbox", "log": "ready"},
+    }
+    assert session.logged_events == [
+        {
+            "timestamp": event.timestamp.isoformat(),
+            "event_type": "tool_log",
+            "data": {"tool": "sandbox", "log": "ready"},
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("event_type", "payload"),
     [

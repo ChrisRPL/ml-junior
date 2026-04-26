@@ -105,7 +105,7 @@ async def _ensure_sandbox(
 
     def _log(msg: str) -> None:
         loop.call_soon_threadsafe(
-            session.event_queue.put_nowait,
+            session.send_event_nowait,
             Event(event_type="tool_log", data={"tool": "sandbox", "log": msg}),
         )
 
