@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from litellm import Message
 from pydantic import ValidationError
 
 from agent.core.events import AgentEvent, EVENT_PAYLOAD_MODELS
@@ -105,6 +106,64 @@ async def test_send_event_nowait_uses_same_envelope_and_log_path(
             "data": {"tool": "sandbox", "log": "ready"},
         }
     ]
+
+
+async def test_events_are_redacted_before_queue_and_log(
+    event_queue,
+    event_collector,
+    fake_tool_router,
+    test_config,
+):
+    session = make_session(event_queue, test_config, fake_tool_router)
+    secret = "hf_eventsecret123456789"
+
+    await session.send_event(
+        Event(
+            "tool_output",
+            {
+                "tool": "hf_jobs",
+                "tool_call_id": "tc_1",
+                "output": f"Authorization: Bearer {secret}",
+                "success": True,
+            },
+        )
+    )
+
+    [event] = await event_collector(event_queue)
+
+    assert event.redaction_status == "partial"
+    assert secret not in event.data["output"]
+    assert event.to_legacy_sse() == {
+        "event_type": "tool_output",
+        "data": {
+            "tool": "hf_jobs",
+            "tool_call_id": "tc_1",
+            "output": "Authorization: Bearer [REDACTED]",
+            "success": True,
+        },
+    }
+    assert secret not in str(session.logged_events)
+    assert session.logged_events[0]["data"] == event.data
+
+
+def test_trajectory_redacts_messages_without_mutating_live_context(
+    event_queue,
+    fake_tool_router,
+    test_config,
+):
+    session = make_session(event_queue, test_config, fake_tool_router)
+    secret = "hf_contextsecret123456789"
+    raw_content = f"Use HF_TOKEN={secret} from /Users/alice/project"
+    session.context_manager.add_message(Message(role="user", content=raw_content))
+
+    trajectory = session.get_trajectory()
+
+    assert secret in session.context_manager.items[-1].content
+    assert "/Users/alice/project" in session.context_manager.items[-1].content
+    assert secret not in str(trajectory["messages"])
+    assert "/Users/alice" not in str(trajectory["messages"])
+    assert "HF_TOKEN=[REDACTED]" in str(trajectory["messages"])
+    assert "/Users/[USER]/project" in str(trajectory["messages"])
 
 
 @pytest.mark.parametrize(

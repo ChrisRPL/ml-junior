@@ -12,6 +12,7 @@ from typing import Any, Optional
 from agent.config import Config
 from agent.context_manager.manager import ContextManager
 from agent.core.events import AgentEvent, Event
+from agent.core.redaction import redact_value
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ class Session:
             )
 
         self._next_event_sequence += 1
-        return envelope
+        return envelope.redacted_copy()
 
     def cancel(self) -> None:
         """Signal cancellation to the running agent loop."""
@@ -213,7 +214,10 @@ class Session:
             "session_start_time": self.session_start_time,
             "session_end_time": datetime.now().isoformat(),
             "model_name": self.config.model_name,
-            "messages": [msg.model_dump() for msg in self.context_manager.items],
+            "messages": [
+                redact_value(msg.model_dump()).value
+                for msg in self.context_manager.items
+            ],
             "events": self.logged_events,
         }
 

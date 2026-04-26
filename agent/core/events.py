@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent.core.redaction import REDACTION_NONE, redact_value
+
 
 @dataclass
 class Event:
@@ -172,3 +174,29 @@ class AgentEvent(BaseModel):
     def to_legacy_dict(self) -> dict[str, Any]:
         """Alias for callers that do not need to know SSE naming."""
         return self.to_legacy_sse()
+
+    def redacted_copy(self) -> AgentEvent:
+        """Return an event copy with serialized data redacted."""
+        result = redact_value(self.data)
+        if result.status == REDACTION_NONE:
+            return self
+        status = _stronger_redaction_status(self.redaction_status, result.status)
+        return self.model_copy(
+            update={
+                "data": result.value,
+                "redaction_status": status,
+            }
+        )
+
+
+def _stronger_redaction_status(left: str, right: str) -> str:
+    order = {
+        RedactionStatus.NONE.value: 0,
+        RedactionStatus.PARTIAL.value: 1,
+        RedactionStatus.REDACTED.value: 2,
+    }
+    left_value = str(left)
+    right_value = str(right)
+    if order.get(left_value, 0) >= order.get(right_value, 0):
+        return left_value
+    return right_value
