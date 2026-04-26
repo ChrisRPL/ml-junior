@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from litellm import Message
 from pydantic import ValidationError
@@ -79,6 +81,7 @@ async def test_logged_events_remain_legacy_trajectory_shape(
     assert session.logged_events[0]["data"] == {"error": "boom"}
     assert "timestamp" in session.logged_events[0]
     assert "sequence" not in session.logged_events[0]
+    assert "redaction_status" not in session.logged_events[0]
 
 
 async def test_send_event_nowait_uses_same_envelope_and_log_path(
@@ -144,6 +147,87 @@ async def test_events_are_redacted_before_queue_and_log(
     }
     assert secret not in str(session.logged_events)
     assert session.logged_events[0]["data"] == event.data
+
+
+async def test_trajectory_includes_redacted_event_metadata_without_changing_events(
+    event_queue,
+    event_collector,
+    fake_tool_router,
+    test_config,
+):
+    session = make_session(event_queue, test_config, fake_tool_router)
+    secret = "hf_exportsecret123456789"
+
+    await session.send_event(
+        Event(
+            "tool_output",
+            {
+                "tool": "hf_jobs",
+                "tool_call_id": "tc_export",
+                "output": f"Authorization: Bearer {secret}",
+                "success": True,
+            },
+        )
+    )
+
+    [event] = await event_collector(event_queue)
+    trajectory = session.get_trajectory()
+
+    assert trajectory["events"] == session.logged_events
+    assert trajectory["events"][0] == {
+        "timestamp": event.timestamp.isoformat(),
+        "event_type": "tool_output",
+        "data": {
+            "tool": "hf_jobs",
+            "tool_call_id": "tc_export",
+            "output": "Authorization: Bearer [REDACTED]",
+            "success": True,
+        },
+    }
+    assert trajectory["event_metadata"] == [
+        {
+            "logged_event_index": 0,
+            "event_id": event.id,
+            "event_type": "tool_output",
+            "sequence": 1,
+            "timestamp": event.timestamp.isoformat(),
+            "schema_version": 1,
+            "redaction_status": "partial",
+        }
+    ]
+    assert secret not in str(trajectory)
+
+
+async def test_local_trajectory_save_exports_event_metadata_without_raw_secret(
+    event_queue,
+    fake_tool_router,
+    test_config,
+    tmp_path,
+):
+    session = make_session(event_queue, test_config, fake_tool_router)
+    secret = "hf_savedsecret123456789"
+
+    await session.send_event(
+        Event(
+            "tool_output",
+            {
+                "tool": "hf_jobs",
+                "tool_call_id": "tc_saved",
+                "output": f"Authorization: Bearer {secret}",
+                "success": True,
+            },
+        )
+    )
+
+    filepath = session.save_trajectory_local(directory=str(tmp_path))
+
+    assert filepath is not None
+    saved = json.loads((tmp_path / filepath.split("/")[-1]).read_text())
+    assert saved["events"] == session.logged_events
+    assert saved["event_metadata"][0]["redaction_status"] == "partial"
+    assert saved["event_metadata"][0]["logged_event_index"] == 0
+    assert "redaction_status" not in saved["events"][0]
+    assert secret not in json.dumps(saved)
 
 
 def test_trajectory_redacts_messages_without_mutating_live_context(

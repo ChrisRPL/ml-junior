@@ -13,6 +13,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+try:
+    from .redaction import redact_value
+except ImportError:
+    _CORE_DIR = Path(__file__).resolve().parent
+    if str(_CORE_DIR) not in sys.path:
+        sys.path.insert(0, str(_CORE_DIR))
+    from redaction import redact_value
+
 load_dotenv()
 
 # Token for session uploads — loaded from env var (never hardcode tokens in source)
@@ -40,9 +48,9 @@ def upload_session_as_file(
         return False
 
     try:
-        # Load session data
+        # Load session data and redact legacy/raw logs before any upload/status write.
         with open(session_file, "r") as f:
-            data = json.load(f)
+            data = redact_value(json.load(f)).value
 
         # Check if already uploaded
         upload_status = data.get("upload_status")

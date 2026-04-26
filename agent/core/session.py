@@ -101,6 +101,7 @@ class Session:
 
         # Session trajectory logging
         self.logged_events: list[dict] = []
+        self.event_metadata: list[dict[str, Any]] = []
         self.session_start_time = datetime.now().isoformat()
         self.turn_count: int = 0
         self.last_auto_save_turn: int = 0
@@ -132,11 +133,23 @@ class Session:
         self._log_event(envelope)
 
     def _log_event(self, envelope: AgentEvent) -> None:
+        logged_event_index = len(self.logged_events)
         self.logged_events.append(
             {
                 "timestamp": envelope.timestamp.isoformat(),
                 "event_type": envelope.event_type,
                 "data": envelope.data,
+            }
+        )
+        self.event_metadata.append(
+            {
+                "logged_event_index": logged_event_index,
+                "event_id": envelope.id,
+                "event_type": envelope.event_type,
+                "sequence": envelope.sequence,
+                "timestamp": envelope.timestamp.isoformat(),
+                "schema_version": envelope.schema_version,
+                "redaction_status": envelope.redaction_status,
             }
         )
 
@@ -219,6 +232,7 @@ class Session:
                 for msg in self.context_manager.items
             ],
             "events": self.logged_events,
+            "event_metadata": self.event_metadata,
         }
 
     def save_trajectory_local(

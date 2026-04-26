@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 import pytest
 from fastapi import HTTPException
+from litellm import Message
 
 import session_manager as session_module
 from agent.core.session import Event
@@ -450,6 +451,35 @@ async def test_chat_sse_quota_error_unsubscribes_before_raising(monkeypatch):
     assert exc_info.value.status_code == 429
     assert fake_manager.user_inputs == []
     assert broadcaster.unsubscribed == [1]
+
+
+async def test_get_session_messages_returns_redacted_copies_without_mutating_context(
+    monkeypatch,
+):
+    secret = "hf_messagessecret123456789"
+    raw_content = f"Use HF_TOKEN={secret} from /Users/alice/project"
+    message = Message(role="user", content=raw_content)
+    fake_manager = SimpleNamespace(
+        sessions={
+            "session-a": SimpleNamespace(
+                is_active=True,
+                session=SimpleNamespace(
+                    context_manager=SimpleNamespace(items=[message])
+                ),
+            )
+        }
+    )
+
+    monkeypatch.setattr(agent_routes, "session_manager", fake_manager)
+    monkeypatch.setattr(agent_routes, "_check_session_access", lambda *_args: None)
+
+    result = await agent_routes.get_session_messages("session-a", {"user_id": "dev"})
+
+    assert secret not in str(result)
+    assert "/Users/alice" not in str(result)
+    assert "[REDACTED]" in result[0]["content"]
+    assert "/Users/[USER]/project" in result[0]["content"]
+    assert message.content == raw_content
 
 
 async def test_interrupt_sets_session_cancellation(manager):

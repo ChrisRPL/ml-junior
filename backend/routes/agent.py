@@ -39,6 +39,7 @@ from session_manager import (
 import user_quotas
 
 from agent.core.llm_params import _resolve_llm_params
+from agent.core.redaction import redact_value
 
 logger = logging.getLogger(__name__)
 
@@ -651,7 +652,10 @@ async def get_session_messages(
     agent_session = session_manager.sessions.get(session_id)
     if not agent_session or not agent_session.is_active:
         raise HTTPException(status_code=404, detail="Session not found or inactive")
-    return [msg.model_dump() for msg in agent_session.session.context_manager.items]
+    return [
+        redact_value(msg.model_dump()).value
+        for msg in agent_session.session.context_manager.items
+    ]
 
 
 @router.post("/undo/{session_id}")
@@ -698,5 +702,3 @@ async def shutdown_session(
     if not success:
         raise HTTPException(status_code=404, detail="Session not found or inactive")
     return {"status": "shutdown_requested", "session_id": session_id}
-
-
