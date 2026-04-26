@@ -84,6 +84,13 @@ Current behavior:
 
 - `ToolRouter` registers built-in tools, then optional MCP tools, then an
   OpenAPI search tool during async initialization.
+- `ToolRouter.call_tool()` still returns the legacy `(output_string,
+  success_bool)` tuple to the orchestrator.
+- `ToolRouter.call_tool_result()` is the structured compatibility path. It
+  normalizes legacy tuple handlers, HF-style `formatted` dictionaries, and MCP
+  content blocks into `agent.core.tool_results.ToolResult`.
+- `ToolResult` carries `display_text`, `success`, optional `ToolError`,
+  `ArtifactRef`, `MetricRecord`, `SideEffect`, raw value, and metadata fields.
 - Built-ins include research, HF docs, HF papers, dataset inspection, planning,
   HF Jobs, HF repo files/git, GitHub examples/repos/read-file, and either local
   tools or sandbox tools.
@@ -102,8 +109,8 @@ Current limitations:
   `NOT_ALLOWED_TOOL_NAMES`; for example, an MCP tool named `sandbox_create`
   replaces the built-in registration. This is current behavior, not a target
   security property.
-- Tool result conversion supports text and placeholder descriptions for images
-  or embedded resources.
+- Existing built-in handlers mostly still return tuples or HF-style dicts; the
+  structured model is currently an adapter layer, not a full handler rewrite.
 
 ## Approvals
 
@@ -146,6 +153,12 @@ Current behavior:
   `session_id`, per-session `sequence`, `timestamp`, `event_type`,
   `schema_version`, `redaction_status`, and typed payload validation for the
   current event list.
+- Event payloads are passed through targeted redaction before queueing and
+  trajectory logging. Redaction covers obvious token/key patterns, bearer auth
+  headers, private token URL query params, local user paths, and private dataset
+  row previews.
+- `Session.get_trajectory()` redacts serialized message copies without mutating
+  the live LLM context in `ContextManager`.
 - The public SSE payload remains the compatibility shape
   `{ "event_type": "...", "data": { ... } }`; envelope metadata is not emitted
   to the frontend yet.
@@ -157,6 +170,8 @@ Current limitations:
 - `EventBroadcaster` discards events when no subscribers are listening.
 - SSE has no replay buffer; reconnects only receive future events.
 - Event envelopes are not persisted yet.
+- Redaction is targeted and heuristic; new provider token formats or unusual
+  private data previews may need additional patterns.
 - `/api/events/{session_id}` currently does not enforce `is_processing` despite
   the docstring saying it is for in-progress sessions.
 
