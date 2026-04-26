@@ -9,6 +9,7 @@ import pytest
 
 from agent.config import Config
 from agent.core.agent_loop import _needs_approval
+from agent.core.tool_results import ArtifactRef, MetricRecord, SideEffect, ToolResult
 from agent.core.tools import NOT_ALLOWED_TOOL_NAMES, ToolRouter, ToolSpec
 
 
@@ -181,6 +182,71 @@ async def test_call_tool_routes_registered_handler_and_preserves_return_contract
 
     assert (output, success) == ("offline ok", True)
     assert calls == [({"value": 1}, session, "tc_1")]
+
+
+async def test_call_tool_result_routes_registered_handler_with_structured_result():
+    async def handler(arguments: dict[str, Any]) -> ToolResult:
+        return ToolResult(
+            display_text=f"created {arguments['name']}",
+            success=True,
+            artifacts=[ArtifactRef(kind="file", uri="file:///tmp/model.json")],
+            metrics=[MetricRecord(name="files", value=1)],
+            side_effects=[
+                SideEffect(
+                    kind="write",
+                    description="Created model metadata",
+                    target="/tmp/model.json",
+                )
+            ],
+        )
+
+    router = ToolRouter({})
+    router.register_tool(
+        ToolSpec(
+            name="structured_create",
+            description="Structured test handler",
+            parameters={"type": "object", "properties": {}},
+            handler=handler,
+        )
+    )
+
+    result = await router.call_tool_result("structured_create", {"name": "model"})
+    output, success = await router.call_tool("structured_create", {"name": "model"})
+
+    assert result.display_text == "created model"
+    assert result.success is True
+    assert result.artifacts[0].uri == "file:///tmp/model.json"
+    assert result.metrics[0].name == "files"
+    assert result.side_effects[0].target == "/tmp/model.json"
+    assert (output, success) == ("created model", True)
+
+
+async def test_call_tool_result_normalizes_hf_style_handler_dict():
+    async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "formatted": f"Found {arguments['count']} results",
+            "totalResults": arguments["count"],
+            "resultsShared": 1,
+        }
+
+    router = ToolRouter({})
+    router.register_tool(
+        ToolSpec(
+            name="hf_style",
+            description="HF style test handler",
+            parameters={"type": "object", "properties": {}},
+            handler=handler,
+        )
+    )
+
+    result = await router.call_tool_result("hf_style", {"count": 4})
+
+    assert result.display_text == "Found 4 results"
+    assert result.success is True
+    assert [(metric.name, metric.value) for metric in result.metrics] == [
+        ("totalResults", 4),
+        ("resultsShared", 1),
+    ]
 
 
 async def test_call_tool_routes_actual_plan_tool_and_emits_plan_update():

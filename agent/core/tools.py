@@ -11,10 +11,15 @@ from typing import Any, Awaitable, Callable, Optional
 logger = logging.getLogger(__name__)
 
 from fastmcp import Client
-from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError as MCPToolError
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from agent.config import MCPServerConfig
+from agent.core.tool_results import (
+    ToolResult,
+    normalize_tool_result,
+    tool_result_from_mcp_content,
+)
 from agent.tools.dataset_tools import (
     HF_INSPECT_DATASET_TOOL_SPEC,
     hf_inspect_dataset_handler,
@@ -120,7 +125,7 @@ class ToolSpec:
     name: str
     description: str
     parameters: dict[str, Any]
-    handler: Optional[Callable[[dict[str, Any]], Awaitable[tuple[str, bool]]]] = None
+    handler: Optional[Callable[..., Awaitable[Any]]] = None
 
 
 class ToolRouter:
@@ -244,34 +249,80 @@ class ToolRouter:
         For MCP tools, converts the CallToolResult content blocks to a string.
         For built-in tools, calls their handler directly.
         """
-        # Check if this is a built-in tool with a handler
+        result = await self.call_tool_result(
+            tool_name,
+            arguments,
+            session=session,
+            tool_call_id=tool_call_id,
+        )
+        return result.to_legacy_tuple()
+
+    async def call_tool_result(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        session: Any = None,
+        tool_call_id: str | None = None,
+    ) -> ToolResult:
+        """
+        Call a tool and return a structured ToolResult.
+
+        This is the opt-in structured path. call_tool() remains the public
+        compatibility API for existing agent-loop consumers.
+        """
         tool = self.tools.get(tool_name)
         if tool and tool.handler:
-            import inspect
-
-            # Check if handler accepts session argument
-            sig = inspect.signature(tool.handler)
-            if "session" in sig.parameters:
-                # Check if handler also accepts tool_call_id parameter
-                if "tool_call_id" in sig.parameters:
-                    return await tool.handler(
-                        arguments, session=session, tool_call_id=tool_call_id
-                    )
-                return await tool.handler(arguments, session=session)
-            return await tool.handler(arguments)
+            result = await self._call_handler(
+                tool.handler,
+                arguments,
+                session=session,
+                tool_call_id=tool_call_id,
+            )
+            return normalize_tool_result(result)
 
         # Otherwise, use MCP client
         if self._mcp_initialized:
             try:
                 result = await self.mcp_client.call_tool(tool_name, arguments)
-                output = convert_mcp_content_to_string(result.content)
-                return output, not result.is_error
-            except ToolError as e:
+                return tool_result_from_mcp_content(
+                    result.content,
+                    is_error=result.is_error,
+                    converter=convert_mcp_content_to_string,
+                    raw=result,
+                )
+            except MCPToolError as e:
                 # Catch MCP tool errors and return them to the agent
                 error_msg = f"Tool error: {str(e)}"
-                return error_msg, False
+                return ToolResult.from_error(
+                    error_msg,
+                    code="mcp_tool_error",
+                    raw=e,
+                )
 
-        return "MCP client not initialized", False
+        return ToolResult.from_error(
+            "MCP client not initialized",
+            code="mcp_client_not_initialized",
+        )
+
+    async def _call_handler(
+        self,
+        handler: Callable[..., Awaitable[Any]],
+        arguments: dict[str, Any],
+        session: Any = None,
+        tool_call_id: str | None = None,
+    ) -> Any:
+        import inspect
+
+        sig = inspect.signature(handler)
+        if "session" in sig.parameters:
+            if "tool_call_id" in sig.parameters:
+                return await handler(
+                    arguments,
+                    session=session,
+                    tool_call_id=tool_call_id,
+                )
+            return await handler(arguments, session=session)
+        return await handler(arguments)
 
 
 # ============================================================================
