@@ -28,7 +28,13 @@ from models import (
     SubmitRequest,
     TruncateRequest,
 )
-from session_manager import MAX_SESSIONS, AgentSession, SessionCapacityError, session_manager
+from session_manager import (
+    MAX_SESSIONS,
+    AgentSession,
+    SessionCapacityError,
+    event_to_legacy_dict,
+    session_manager,
+)
 
 import user_quotas
 
@@ -584,8 +590,9 @@ def _sse_response(broadcaster, event_queue, sub_id) -> StreamingResponse:
                     # SSE comment — ignored by parsers, keeps connection alive
                     yield ": keepalive\n\n"
                     continue
-                event_type = msg.get("event_type", "")
-                yield f"data: {json.dumps(msg)}\n\n"
+                legacy_msg = event_to_legacy_dict(msg)
+                event_type = legacy_msg.get("event_type", "")
+                yield f"data: {json.dumps(legacy_msg)}\n\n"
                 if event_type in _TERMINAL_EVENTS:
                     break
         finally:

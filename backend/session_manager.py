@@ -38,6 +38,29 @@ class Submission:
 logger = logging.getLogger(__name__)
 
 
+def event_to_legacy_dict(event: Any) -> dict[str, Any]:
+    """Convert internal agent events to the public SSE payload shape."""
+    if isinstance(event, dict):
+        return {
+            "event_type": event.get("event_type", ""),
+            "data": event.get("data"),
+        }
+
+    for method_name in ("to_legacy_dict", "to_legacy_sse"):
+        to_legacy = getattr(event, method_name, None)
+        if callable(to_legacy):
+            legacy = to_legacy()
+            return {
+                "event_type": legacy.get("event_type", ""),
+                "data": legacy.get("data"),
+            }
+
+    return {
+        "event_type": getattr(event, "event_type", ""),
+        "data": getattr(event, "data", None),
+    }
+
+
 class EventBroadcaster:
     """Reads from the agent's event queue and fans out to SSE subscribers.
 
@@ -66,8 +89,8 @@ class EventBroadcaster:
         """Main loop — reads from source queue and broadcasts."""
         while True:
             try:
-                event: Event = await self._source.get()
-                msg = {"event_type": event.event_type, "data": event.data}
+                event = await self._source.get()
+                msg = event_to_legacy_dict(event)
                 for q in self._subscribers.values():
                     await q.put(msg)
             except asyncio.CancelledError:

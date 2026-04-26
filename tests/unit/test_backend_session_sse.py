@@ -72,6 +72,36 @@ class FakeSession:
         return self._cancelled
 
 
+class FakeAgentEvent:
+    def __init__(
+        self,
+        event_type: str,
+        data: dict[str, Any],
+        metadata: dict[str, Any],
+    ):
+        self.event_type = event_type
+        self.data = data
+        self.metadata = metadata
+
+    def to_legacy_dict(self) -> dict[str, Any]:
+        return {
+            "event_type": self.event_type,
+            "data": self.data,
+            "metadata": self.metadata,
+        }
+
+
+class FakeSseAgentEvent(FakeAgentEvent):
+    to_legacy_dict = None
+
+    def to_legacy_sse(self) -> dict[str, Any]:
+        return {
+            "event_type": self.event_type,
+            "data": self.data,
+            "metadata": self.metadata,
+        }
+
+
 class FakeRequest:
     def __init__(self, body: dict[str, Any]):
         self._body = body
@@ -249,6 +279,59 @@ async def test_sse_response_closes_and_unsubscribes_on_terminal_event():
     assert event_queue.qsize() == 1
 
 
+async def test_sse_response_strips_envelope_metadata_from_public_payload():
+    class TrackingBroadcaster:
+        def __init__(self):
+            self.unsubscribed: list[int] = []
+
+        def unsubscribe(self, sub_id: int) -> None:
+            self.unsubscribed.append(sub_id)
+
+    broadcaster = TrackingBroadcaster()
+    event_queue = asyncio.Queue()
+    await event_queue.put(
+        FakeAgentEvent(
+            event_type="turn_complete",
+            data={"ok": True},
+            metadata={"sequence": 12, "created_at": "internal"},
+        )
+    )
+
+    response = _sse_response(broadcaster, event_queue, sub_id=7)
+    chunks = [
+        _decode_sse_chunk(chunk)
+        async for chunk in response.body_iterator
+    ]
+
+    assert chunks == [{"event_type": "turn_complete", "data": {"ok": True}}]
+    assert broadcaster.unsubscribed == [7]
+
+
+async def test_sse_response_supports_to_legacy_sse_envelope_method():
+    class TrackingBroadcaster:
+        def __init__(self):
+            self.unsubscribed: list[int] = []
+
+        def unsubscribe(self, sub_id: int) -> None:
+            self.unsubscribed.append(sub_id)
+
+    broadcaster = TrackingBroadcaster()
+    event_queue = asyncio.Queue()
+    await event_queue.put(
+        FakeSseAgentEvent(
+            event_type="turn_complete",
+            data={"ok": True},
+            metadata={"sequence": 12, "created_at": "internal"},
+        )
+    )
+
+    response = _sse_response(broadcaster, event_queue, sub_id=7)
+    chunks = [_decode_sse_chunk(chunk) async for chunk in response.body_iterator]
+
+    assert chunks == [{"event_type": "turn_complete", "data": {"ok": True}}]
+    assert broadcaster.unsubscribed == [7]
+
+
 async def test_chat_sse_text_route_subscribes_before_submit_and_closes(
     monkeypatch,
 ):
@@ -402,7 +485,13 @@ async def test_event_broadcaster_current_subscribers_only_transient_reconnect():
         await _wait_until(source.empty)
 
         first_id, first_queue = broadcaster.subscribe()
-        await source.put(Event(event_type="after_first_subscribe", data={"n": 1}))
+        await source.put(
+            FakeAgentEvent(
+                event_type="after_first_subscribe",
+                data={"n": 1},
+                metadata={"sequence": 1},
+            )
+        )
 
         assert await _queue_get(first_queue) == {
             "event_type": "after_first_subscribe",

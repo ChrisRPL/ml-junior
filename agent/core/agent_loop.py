@@ -887,7 +887,7 @@ class Handlers:
 
         if session.is_cancelled:
             await _cleanup_on_cancel(session)
-            await session.send_event(Event(event_type="interrupted"))
+            await session.send_event(Event(event_type="interrupted", data={}))
         elif not errored:
             await session.send_event(
                 Event(
@@ -908,7 +908,7 @@ class Handlers:
         removed = session.context_manager.undo_last_turn()
         if not removed:
             logger.warning("Undo: no user message found to remove")
-        await session.send_event(Event(event_type="undo_complete"))
+        await session.send_event(Event(event_type="undo_complete", data={}))
 
     @staticmethod
     async def exec_approval(session: Session, approvals: list[dict]) -> None:
@@ -1066,7 +1066,7 @@ class Handlers:
                         data={"tool_call_id": tc.id, "tool": tool_name, "state": "cancelled"},
                     ))
                 await _cleanup_on_cancel(session)
-                await session.send_event(Event(event_type="interrupted"))
+                await session.send_event(Event(event_type="interrupted", data={}))
                 session.increment_turn()
                 await session.auto_save_if_needed()
                 return
@@ -1156,7 +1156,7 @@ class Handlers:
             _ = session.save_and_upload_detached(repo_id)
 
         session.is_running = False
-        await session.send_event(Event(event_type="shutdown"))
+        await session.send_event(Event(event_type="shutdown", data={}))
         return True
 
 

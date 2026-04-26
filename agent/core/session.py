@@ -4,7 +4,6 @@ import logging
 import subprocess
 import sys
 import uuid
-from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -12,6 +11,7 @@ from typing import Any, Optional
 
 from agent.config import Config
 from agent.context_manager.manager import ContextManager
+from agent.core.events import AgentEvent, Event
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +58,6 @@ class OpType(Enum):
     SHUTDOWN = "shutdown"
 
 
-@dataclass
-class Event:
-    event_type: str
-    data: Optional[dict[str, Any]] = None
-
-
 class Session:
     """
     Maintains agent session state
@@ -102,6 +96,7 @@ class Session:
         self.pending_approval: Optional[dict[str, Any]] = None
         self.sandbox = None
         self._running_job_ids: set[str] = set()  # HF job IDs currently executing
+        self._next_event_sequence = 1
 
         # Session trajectory logging
         self.logged_events: list[dict] = []
@@ -119,18 +114,36 @@ class Session:
         # Key absent → not probed yet; fall back to the raw preference.
         self.model_effective_effort: dict[str, str | None] = {}
 
-    async def send_event(self, event: Event) -> None:
+    async def send_event(self, event: Event | AgentEvent) -> None:
         """Send event back to client and log to trajectory"""
-        await self.event_queue.put(event)
+        envelope = self._envelope_event(event)
+        await self.event_queue.put(envelope)
 
         # Log event to trajectory
         self.logged_events.append(
             {
-                "timestamp": datetime.now().isoformat(),
-                "event_type": event.event_type,
-                "data": event.data,
+                "timestamp": envelope.timestamp.isoformat(),
+                "event_type": envelope.event_type,
+                "data": envelope.data,
             }
         )
+
+    def _envelope_event(self, event: Event | AgentEvent) -> AgentEvent:
+        sequence = self._next_event_sequence
+
+        if isinstance(event, AgentEvent):
+            envelope = event.model_copy(
+                update={"session_id": self.session_id, "sequence": sequence}
+            )
+        else:
+            envelope = AgentEvent.from_legacy(
+                event,
+                session_id=self.session_id,
+                sequence=sequence,
+            )
+
+        self._next_event_sequence += 1
+        return envelope
 
     def cancel(self) -> None:
         """Signal cancellation to the running agent loop."""

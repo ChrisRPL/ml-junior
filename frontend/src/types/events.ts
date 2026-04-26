@@ -21,7 +21,22 @@ export type EventType =
   | 'undo_complete'
   | 'plan_update';
 
-export interface AgentEvent {
+export type EventRedactionStatus =
+  | 'none'
+  | 'partial'
+  | 'redacted'
+  | (string & {});
+
+export interface AgentEventMetadata {
+  id?: string;
+  session_id?: string;
+  sequence?: number;
+  timestamp?: string;
+  schema_version?: string | number;
+  redaction_status?: EventRedactionStatus;
+}
+
+export interface AgentEvent extends AgentEventMetadata {
   event_type: EventType;
   data?: Record<string, unknown>;
 }

@@ -16,7 +16,8 @@ Current behavior:
 - The runtime is a Python async agent package, a FastAPI backend, and a Vite
   frontend built into the production Docker image.
 - The agent loop is queue-driven. Inputs become `Submission` objects containing
-  an `Operation`; agent output becomes `Event` objects.
+  an `Operation`; agent output is accepted through the legacy `Event` shape and
+  normalized into internal `AgentEvent` envelopes.
 - The default config is `configs/main_agent_config.json`, with an Anthropic
   model, session saving enabled, CPU job confirmation enabled, automatic file
   upload enabled, and one Hugging Face MCP server configured.
@@ -141,6 +142,13 @@ Current behavior:
   `shutdown`.
 - `/api/events/{session_id}` subscribes to events for an existing session.
 - SSE payloads are JSON under `data:`. Keepalive comments are sent every 15s.
+- Internal agent events are Pydantic `AgentEvent` envelopes with `id`,
+  `session_id`, per-session `sequence`, `timestamp`, `event_type`,
+  `schema_version`, `redaction_status`, and typed payload validation for the
+  current event list.
+- The public SSE payload remains the compatibility shape
+  `{ "event_type": "...", "data": { ... } }`; envelope metadata is not emitted
+  to the frontend yet.
 - The backend subscribes to the broadcaster before submitting work so it does
   not miss same-turn events.
 
@@ -148,6 +156,7 @@ Current limitations:
 
 - `EventBroadcaster` discards events when no subscribers are listening.
 - SSE has no replay buffer; reconnects only receive future events.
+- Event envelopes are not persisted yet.
 - `/api/events/{session_id}` currently does not enforce `is_processing` despite
   the docstring saying it is for in-progress sessions.
 
