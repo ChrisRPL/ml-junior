@@ -159,9 +159,14 @@ Current behavior:
   row previews.
 - `Session.get_trajectory()` redacts serialized message copies without mutating
   the live LLM context in `ContextManager`.
+- Session auto-save and detached upload use `Session.get_trajectory()`, and the
+  detached uploader redacts loaded legacy JSON again before JSONL upload.
+- `GET /api/session/{session_id}/messages` returns redacted serialized copies
+  for browser/cache recovery without mutating live `ContextManager` messages.
 - The public SSE payload remains the compatibility shape
   `{ "event_type": "...", "data": { ... } }`; envelope metadata is not emitted
-  to the frontend yet.
+  to the frontend yet. This is intentional until the replay/cursor event-store
+  work defines the public event envelope contract.
 - The backend subscribes to the broadcaster before submitting work so it does
   not miss same-turn events.
 
@@ -170,6 +175,8 @@ Current limitations:
 - `EventBroadcaster` discards events when no subscribers are listening.
 - SSE has no replay buffer; reconnects only receive future events.
 - Event envelopes are not persisted yet.
+- `redaction_status` and other envelope metadata are internal-only today; public
+  SSE remains legacy-shaped for compatibility.
 - Redaction is targeted and heuristic; new provider token formats or unusual
   private data previews may need additional patterns.
 - `/api/events/{session_id}` currently does not enforce `is_processing` despite
