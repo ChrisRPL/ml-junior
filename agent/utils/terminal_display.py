@@ -434,21 +434,15 @@ def print_yolo_approve(count: int) -> None:
 
 # ── Help ───────────────────────────────────────────────────────────────
 
-HELP_TEXT = f"""\
-{_I}[bold]Commands[/bold]
-{_I}  [cyan]/help[/cyan]            Show this help
-{_I}  [cyan]/undo[/cyan]            Undo last turn
-{_I}  [cyan]/compact[/cyan]         Compact context window
-{_I}  [cyan]/model[/cyan] [id]      Show available models or switch
-{_I}  [cyan]/effort[/cyan] [level]  Reasoning effort (minimal|low|medium|high|xhigh|max|off)
-{_I}  [cyan]/yolo[/cyan]            Toggle auto-approve mode
-{_I}  [cyan]/status[/cyan]          Current model & turn count
-{_I}  [cyan]/quit[/cyan]            Exit"""
+def get_help_text() -> str:
+    from agent.core.commands import format_command_help
+
+    return format_command_help(indent=_I)
 
 
 def print_help() -> None:
     _console.print()
-    _console.print(HELP_TEXT)
+    _console.print(get_help_text())
     _console.print()
 
 

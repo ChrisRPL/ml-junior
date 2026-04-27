@@ -21,6 +21,7 @@ import litellm
 from prompt_toolkit import PromptSession
 
 from agent.config import load_config
+from agent.core.commands import parse_slash_command
 from agent.core.agent_loop import submission_loop
 from agent.core import model_switcher
 from agent.core.session import OpType
@@ -698,7 +699,7 @@ async def get_user_input(prompt_session: PromptSession) -> str:
 
 # ── Slash command helpers ────────────────────────────────────────────────
 
-# Slash commands are defined in terminal_display
+# Slash command metadata lives in agent.core.commands.
 
 
 async def _handle_slash_command(
@@ -715,12 +716,24 @@ async def _handle_slash_command(
     Async because ``/model`` fires a probe ping to validate the model+effort
     combo before committing the switch.
     """
-    parts = cmd.strip().split(None, 1)
-    command = parts[0].lower()
-    arg = parts[1].strip() if len(parts) > 1 else ""
+    parsed = parse_slash_command(cmd)
+    if parsed.spec is None:
+        command = parsed.command_text
+        print(f"Unknown command: {command}. Type /help for available commands.")
+        return None
+
+    command = parsed.spec.name
+    arg = parsed.arguments
+
+    if not parsed.spec.implemented:
+        print(f"{command} is not implemented yet.")
+        return None
 
     if command == "/help":
         print_help()
+        return None
+
+    if command == "/quit":
         return None
 
     if command == "/undo":
