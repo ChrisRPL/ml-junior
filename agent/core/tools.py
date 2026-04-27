@@ -4,6 +4,7 @@ Provides ToolSpec and ToolRouter for managing both built-in and MCP tools
 """
 
 import logging
+import re
 import warnings
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
@@ -182,6 +183,11 @@ def tool_metadata(
     read_only: bool | None = None,
     local: bool | None = None,
     reason: str | None = None,
+    mcp_origin: str | None = None,
+    mcp_server: str | None = None,
+    mcp_tool: str | None = None,
+    mcp_trusted: bool | None = None,
+    mcp_forwarded_hf_token: bool | None = None,
 ) -> Any:
     values = {
         "risk": _coerce_policy_value(RiskLevel, risk),
@@ -203,6 +209,11 @@ def tool_metadata(
         "budget_impact": budget,
         "credential_usage": list(credentials),
         "reason": reason,
+        "mcp_origin": mcp_origin,
+        "mcp_server": mcp_server,
+        "mcp_tool": mcp_tool,
+        "mcp_trusted": mcp_trusted,
+        "mcp_forwarded_hf_token": mcp_forwarded_hf_token,
     }
 
     for candidate in (
@@ -429,6 +440,64 @@ class ToolSpec:
     metadata: Optional[Any] = None
 
 
+@dataclass(frozen=True)
+class MCPToolOrigin:
+    """Origin map for an LLM-facing MCP tool name."""
+
+    server_name: str
+    raw_tool_name: str
+    client_tool_name: str
+    namespaced_tool_name: str
+    trusted: bool
+    forwarded_hf_token: bool
+
+
+@dataclass(frozen=True)
+class MCPServerCredentialPolicy:
+    """Credential forwarding state for one configured MCP server."""
+
+    server_name: str
+    trusted: bool
+    explicit_authorization: bool
+    forwarded_hf_token: bool
+
+
+_MCP_NAME_PART_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
+_MCP_NAME_UNDERSCORE_PATTERN = re.compile(r"_+")
+_DEFAULT_MCP_SERVER_NAME = "default"
+
+
+def _normalize_mcp_name_part(value: str) -> str:
+    normalized = _MCP_NAME_PART_PATTERN.sub("_", str(value).strip().lower())
+    normalized = _MCP_NAME_UNDERSCORE_PATTERN.sub("_", normalized).strip("_")
+    return normalized or "unnamed"
+
+
+def _namespaced_mcp_tool_name(server_name: str, raw_tool_name: str) -> str:
+    return (
+        f"mcp__{_normalize_mcp_name_part(server_name)}"
+        f"__{_normalize_mcp_name_part(raw_tool_name)}"
+    )
+
+
+def _headers_have_authorization(headers: dict[str, Any]) -> bool:
+    return any(str(key).lower() == "authorization" for key in headers)
+
+
+def _tool_meta_value(tool: Any, *keys: str) -> Any:
+    meta = getattr(tool, "meta", None)
+    if meta is None:
+        meta = getattr(tool, "_meta", None)
+    if hasattr(meta, "model_dump"):
+        meta = meta.model_dump()
+    if not isinstance(meta, dict):
+        meta = {}
+    for key in keys:
+        if key in meta:
+            return meta[key]
+    return None
+
+
 class DefaultToolPolicyEngine:
     """Default router-boundary policy for registered tools.
 
@@ -575,9 +644,14 @@ class ToolRouter:
         hf_token: str | None = None,
         local_mode: bool = False,
         policy_engine: Any | None = None,
+        trusted_hf_mcp_servers: list[str] | tuple[str, ...] | set[str] | None = None,
     ):
         self.tools: dict[str, ToolSpec] = {}
         self.mcp_servers: dict[str, dict[str, Any]] = {}
+        self.mcp_server_credential_policies: dict[str, MCPServerCredentialPolicy] = {}
+        self.mcp_tool_origins: dict[str, MCPToolOrigin] = {}
+        self._mcp_server_names = list(mcp_servers.keys())
+        self._trusted_hf_mcp_servers = set(trusted_hf_mcp_servers or ())
         self.policy_engine = policy_engine or DefaultToolPolicyEngine()
 
         for tool in create_builtin_tools(local_mode=local_mode):
@@ -588,35 +662,163 @@ class ToolRouter:
             mcp_servers_payload = {}
             for name, server in mcp_servers.items():
                 data = server.model_dump()
-                if hf_token:
-                    data.setdefault("headers", {})["Authorization"] = f"Bearer {hf_token}"
+                data, credential_policy = self._apply_mcp_credential_policy(
+                    name,
+                    data,
+                    hf_token=hf_token,
+                )
+                self.mcp_server_credential_policies[name] = credential_policy
                 mcp_servers_payload[name] = data
+            self.mcp_servers = mcp_servers_payload
             self.mcp_client = Client({"mcpServers": mcp_servers_payload})
         self._mcp_initialized = False
 
     def register_tool(self, tool: ToolSpec) -> None:
         self.tools[tool.name] = tool
 
+    def _apply_mcp_credential_policy(
+        self,
+        server_name: str,
+        server_data: dict[str, Any],
+        *,
+        hf_token: str | None,
+    ) -> tuple[dict[str, Any], MCPServerCredentialPolicy]:
+        data = dict(server_data)
+        raw_headers = data.get("headers")
+        headers = dict(raw_headers or {}) if isinstance(raw_headers, dict) else {}
+        explicit_authorization = _headers_have_authorization(headers)
+        trusted = server_name in self._trusted_hf_mcp_servers
+        forwarded_hf_token = bool(hf_token and trusted and not explicit_authorization)
+
+        if forwarded_hf_token:
+            headers["Authorization"] = f"Bearer {hf_token}"
+            data["headers"] = headers
+        elif raw_headers is not None:
+            data["headers"] = raw_headers
+
+        return data, MCPServerCredentialPolicy(
+            server_name=server_name,
+            trusted=trusted,
+            explicit_authorization=explicit_authorization,
+            forwarded_hf_token=forwarded_hf_token,
+        )
+
     async def register_mcp_tools(self) -> None:
         tools = await self.mcp_client.list_tools()
         registered_names = []
         skipped_count = 0
         for tool in tools:
-            if tool.name in NOT_ALLOWED_TOOL_NAMES:
+            origin = self._mcp_tool_origin(tool)
+            if origin is None:
                 skipped_count += 1
                 continue
-            registered_names.append(tool.name)
+            if origin.raw_tool_name in NOT_ALLOWED_TOOL_NAMES:
+                skipped_count += 1
+                continue
+            if origin.namespaced_tool_name in self.tools:
+                skipped_count += 1
+                logger.warning(
+                    "Skipping MCP tool %s from server %s: namespaced name %s collides with an existing tool",
+                    origin.raw_tool_name,
+                    origin.server_name,
+                    origin.namespaced_tool_name,
+                )
+                continue
+            registered_names.append(origin.namespaced_tool_name)
+            self.mcp_tool_origins[origin.namespaced_tool_name] = origin
             self.register_tool(
                 ToolSpec(
-                    name=tool.name,
+                    name=origin.namespaced_tool_name,
                     description=tool.description,
                     parameters=tool.inputSchema,
                     handler=None,
-                    metadata=MCP_DEFAULT_METADATA,
+                    metadata=self._mcp_metadata_for_origin(origin),
                 )
             )
         logger.info(
             f"Loaded {len(registered_names)} MCP tools: {', '.join(registered_names)} ({skipped_count} disabled)"
+        )
+
+    def _mcp_tool_origin(self, tool: Any) -> MCPToolOrigin | None:
+        client_tool_name = str(tool.name)
+        explicit_server = (
+            getattr(tool, "server_name", None)
+            or _tool_meta_value(tool, "server_name", "mcp_server", "server")
+        )
+        explicit_raw_tool = (
+            getattr(tool, "raw_tool_name", None)
+            or _tool_meta_value(tool, "raw_tool_name", "mcp_tool", "tool")
+        )
+
+        if explicit_server:
+            server_name = str(explicit_server)
+            raw_tool_name = str(explicit_raw_tool or client_tool_name)
+        else:
+            inferred = self._infer_mcp_origin(client_tool_name)
+            if inferred is None:
+                logger.warning(
+                    "Skipping MCP tool %s: could not determine a unique server origin",
+                    client_tool_name,
+                )
+                return None
+            server_name, raw_tool_name = inferred
+
+        namespaced_tool_name = _namespaced_mcp_tool_name(server_name, raw_tool_name)
+        policy = self.mcp_server_credential_policies.get(
+            server_name,
+            MCPServerCredentialPolicy(
+                server_name=server_name,
+                trusted=server_name in self._trusted_hf_mcp_servers,
+                explicit_authorization=False,
+                forwarded_hf_token=False,
+            ),
+        )
+        return MCPToolOrigin(
+            server_name=server_name,
+            raw_tool_name=raw_tool_name,
+            client_tool_name=client_tool_name,
+            namespaced_tool_name=namespaced_tool_name,
+            trusted=policy.trusted,
+            forwarded_hf_token=policy.forwarded_hf_token,
+        )
+
+    def _infer_mcp_origin(self, client_tool_name: str) -> tuple[str, str] | None:
+        if len(self._mcp_server_names) == 1:
+            return self._mcp_server_names[0], client_tool_name
+        if not self._mcp_server_names:
+            return _DEFAULT_MCP_SERVER_NAME, client_tool_name
+
+        matches = [
+            (server_name, client_tool_name[len(server_name) + 1 :])
+            for server_name in self._mcp_server_names
+            if client_tool_name.startswith(f"{server_name}_")
+            and len(client_tool_name) > len(server_name) + 1
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def _mcp_metadata_for_origin(self, origin: MCPToolOrigin) -> Any:
+        credentials = ["mcp_server"]
+        if origin.forwarded_hf_token:
+            credentials.append("hf_token")
+        return tool_metadata(
+            risk="unknown",
+            side_effect="external_service",
+            rollback="unknown",
+            budget="unknown",
+            credentials=tuple(credentials),
+            source="mcp",
+            reason=(
+                f"MCP tool from server '{origin.server_name}'. "
+                f"Trusted HF token forwarding: {origin.trusted}. "
+                f"Forwarded user HF token: {origin.forwarded_hf_token}."
+            ),
+            mcp_origin=f"{origin.server_name}:{origin.raw_tool_name}",
+            mcp_server=origin.server_name,
+            mcp_tool=origin.raw_tool_name,
+            mcp_trusted=origin.trusted,
+            mcp_forwarded_hf_token=origin.forwarded_hf_token,
         )
 
     async def register_openapi_tool(self) -> None:
@@ -797,11 +999,14 @@ class ToolRouter:
                 config=getattr(session, "config", None),
             )
         elif self._mcp_initialized:
-            decision = self.evaluate_unregistered_mcp_tool_call(
-                tool_name,
-                arguments,
-                session=session,
-                config=getattr(session, "config", None),
+            decision = policy_decision(
+                allowed=False,
+                requires_approval=False,
+                reason=(
+                    f"Unknown MCP tool: {tool_name}. "
+                    "MCP tools must be registered and called by their namespaced name."
+                ),
+                code="unknown_mcp_tool",
             )
         else:
             decision = None
@@ -846,9 +1051,19 @@ class ToolRouter:
             return normalize_tool_result(result)
 
         # Otherwise, use MCP client
-        if self._mcp_initialized:
+        if self._mcp_initialized and tool is not None:
             try:
-                result = await self.mcp_client.call_tool(tool_name, arguments)
+                origin = self.mcp_tool_origins.get(tool_name)
+                if origin is None:
+                    return ToolResult.from_error(
+                        f"MCP tool origin missing for {tool_name}",
+                        code="mcp_tool_origin_missing",
+                        kind="policy",
+                    )
+                result = await self.mcp_client.call_tool(
+                    origin.client_tool_name,
+                    arguments,
+                )
                 return tool_result_from_mcp_content(
                     result.content,
                     is_error=result.is_error,

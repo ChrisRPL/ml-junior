@@ -31,9 +31,15 @@ async def _queue_get(queue: asyncio.Queue, timeout: float = 1.0) -> Any:
 
 
 class FakeToolRouter:
-    def __init__(self, mcp_servers: dict[str, Any] | None = None, hf_token: str | None = None):
+    def __init__(
+        self,
+        mcp_servers: dict[str, Any] | None = None,
+        hf_token: str | None = None,
+        trusted_hf_mcp_servers: list[str] | None = None,
+    ):
         self.mcp_servers = mcp_servers or {}
         self.hf_token = hf_token
+        self.trusted_hf_mcp_servers = trusted_hf_mcp_servers or []
         self.entered = False
 
     async def __aenter__(self):

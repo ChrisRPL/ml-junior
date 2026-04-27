@@ -33,6 +33,11 @@ class ToolMetadata:
     budget_impact: str | None = None
     credential_usage: list[str] = field(default_factory=list)
     reason: str | None = None
+    mcp_origin: str | None = None
+    mcp_server: str | None = None
+    mcp_tool: str | None = None
+    mcp_trusted: bool | None = None
+    mcp_forwarded_hf_token: bool | None = None
 
 
 @dataclass
@@ -410,6 +415,9 @@ def _metadata_from_router(tool_name: str, tool_router: Any | None) -> ToolMetada
     if isinstance(tools, dict):
         spec = tools.get(tool_name)
         if spec is not None and getattr(spec, "handler", None) is None:
+            metadata = getattr(spec, "metadata", None)
+            if isinstance(metadata, ToolMetadata):
+                return metadata
             return ToolMetadata(source="mcp")
     return ToolMetadata()
 

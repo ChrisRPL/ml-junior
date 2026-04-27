@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 
 from agent.core.tools import (
-    MCP_DEFAULT_METADATA,
     ToolRouter,
     ToolSpec,
     create_builtin_tools,
@@ -114,10 +113,14 @@ async def test_mcp_tools_get_default_metadata_and_are_evaluable():
 
     await router.register_mcp_tools()
 
-    tool = router.tools["mcp_lookup"]
-    decision = router.evaluate_tool_call("mcp_lookup", {})
+    tool = router.tools["mcp__default__mcp_lookup"]
+    decision = router.evaluate_tool_call("mcp__default__mcp_lookup", {})
 
-    assert tool.metadata is MCP_DEFAULT_METADATA
+    assert tool.metadata.source == "mcp"
+    assert tool.metadata.mcp_server == "default"
+    assert tool.metadata.mcp_tool == "mcp_lookup"
+    assert tool.metadata.mcp_trusted is False
+    assert tool.metadata.mcp_forwarded_hf_token is False
     assert _metadata_value(tool.metadata, "credentials") == ["mcp_server"]
     assert _decision_value(decision, "allowed") is True
     assert _decision_value(decision, "requires_approval") is True
@@ -236,14 +239,14 @@ async def test_direct_approval_required_tool_call_is_blocked_until_approved():
     assert called is True
 
 
-async def test_unregistered_mcp_tool_is_policy_checked_before_fallthrough():
+async def test_unregistered_mcp_tool_is_blocked_even_when_policy_approved():
     router = ToolRouter({})
     fake_mcp = FakeMCPClient([])
     router.mcp_client = fake_mcp
     router._mcp_initialized = True
 
     blocked = await router.call_tool_result("unregistered_mcp_tool", {"value": 1})
-    allowed = await router.call_tool_result(
+    still_blocked = await router.call_tool_result(
         "unregistered_mcp_tool",
         {"value": 1},
         policy_approved=True,
@@ -252,6 +255,8 @@ async def test_unregistered_mcp_tool_is_policy_checked_before_fallthrough():
     assert blocked.success is False
     assert blocked.error is not None
     assert blocked.error.kind == "policy"
-    assert blocked.error.code == "tool_policy_approval_required"
-    assert fake_mcp.calls == [("unregistered_mcp_tool", {"value": 1})]
-    assert allowed.success is True
+    assert blocked.error.code == "unknown_mcp_tool"
+    assert still_blocked.success is False
+    assert still_blocked.error is not None
+    assert still_blocked.error.code == "unknown_mcp_tool"
+    assert fake_mcp.calls == []

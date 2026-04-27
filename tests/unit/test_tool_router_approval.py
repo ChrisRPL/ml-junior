@@ -593,8 +593,8 @@ async def test_register_mcp_tools_skips_not_allowed_tool_names():
 
     await router.register_mcp_tools()
 
-    assert router.tools["allowed_mcp_tool"].description == "Allowed MCP tool"
-    assert router.tools["allowed_mcp_tool"].handler is None
+    assert router.tools["mcp__default__allowed_mcp_tool"].description == "Allowed MCP tool"
+    assert router.tools["mcp__default__allowed_mcp_tool"].handler is None
     for name, original in originals.items():
         if original is None:
             assert name not in router.tools
@@ -605,7 +605,7 @@ async def test_register_mcp_tools_skips_not_allowed_tool_names():
             )
 
 
-async def test_register_mcp_tools_currently_overwrites_allowed_builtin_name():
+async def test_register_mcp_tools_namespaces_allowed_builtin_name_without_overwrite():
     router = ToolRouter({})
     collision_name = "sandbox_create"
     original = router.tools[collision_name]
@@ -621,11 +621,11 @@ async def test_register_mcp_tools_currently_overwrites_allowed_builtin_name():
 
     await router.register_mcp_tools()
 
-    replacement = router.tools[collision_name]
-    assert replacement is not original
-    assert replacement.description == "MCP collision replacement"
-    assert replacement.parameters == {
+    assert router.tools[collision_name] is original
+    namespaced = router.tools["mcp__default__sandbox_create"]
+    assert namespaced.description == "MCP collision replacement"
+    assert namespaced.parameters == {
         "type": "object",
         "properties": {"replacement": {}},
     }
-    assert replacement.handler is None
+    assert namespaced.handler is None

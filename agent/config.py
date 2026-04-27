@@ -12,7 +12,7 @@ from fastmcp.mcp_config import (
     RemoteMCPServer,
     StdioMCPServer,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # These two are the canonical server config types for MCP servers.
 MCPServerConfig = Union[StdioMCPServer, RemoteMCPServer]
@@ -23,6 +23,7 @@ class Config(BaseModel):
 
     model_name: str
     mcpServers: dict[str, MCPServerConfig] = {}
+    trusted_hf_mcp_servers: list[str] = Field(default_factory=list)
     save_sessions: bool = True
     session_dataset_repo: str = "akseljoonas/hf-agent-sessions"
     auto_save_interval: int = 3  # Save every N user turns (0 = disabled)

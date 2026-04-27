@@ -96,21 +96,25 @@ Current behavior:
 - Built-ins include research, HF docs, HF papers, dataset inspection, planning,
   HF Jobs, HF repo files/git, GitHub examples/repos/read-file, and either local
   tools or sandbox tools.
-- MCP tools named `hf_jobs`, `hf_doc_search`, `hf_doc_fetch`, and `hf_whoami`
-  are skipped to avoid conflicts with built-ins.
+- MCP tools are exposed to the LLM as `mcp__{server}__{tool}` using deterministic
+  normalization, with an origin map back to the configured server and raw tool
+  name. Raw MCP tools named `hf_jobs`, `hf_doc_search`, `hf_doc_fetch`, and
+  `hf_whoami` are skipped to avoid conflicts with built-ins.
+- User HF tokens are forwarded to MCP servers only when the configured server
+  name appears in `trusted_hf_mcp_servers`; explicit `Authorization` headers in
+  an MCP server config are preserved and not overwritten.
 - Tool calls are evaluated by router policy before execution. Calls go to a
-  Python handler when present. Otherwise they go through the FastMCP client if
-  initialized.
+  Python handler when present. Registered namespaced MCP calls go through the
+  FastMCP client with their original raw tool name. Unknown raw MCP tool names
+  are blocked rather than forwarded.
 - MCP connection failure is non-fatal; the agent continues without MCP tools.
 
 Current limitations:
 
 - Tool availability can change at startup depending on network, MCP, and
   OpenAPI initialization.
-- MCP tools can currently overwrite built-in tools whose names are not in
-  `NOT_ALLOWED_TOOL_NAMES`; for example, an MCP tool named `sandbox_create`
-  replaces the built-in registration. This is current behavior, not a target
-  security property.
+- Generic MCP tools remain conservatively approval-gated until a narrower policy
+  exists for a specific tool/server.
 - Existing built-in handlers mostly still return tuples or HF-style dicts; the
   structured model is currently an adapter layer, not a full handler rewrite.
 
@@ -127,6 +131,10 @@ Current behavior:
   execution. `ToolRouter.call_tool_result(...)` denies policy-blocked calls and
   refuses approval-required calls unless the caller passes the approved
   execution flag used by `exec_approval`.
+- The research subagent uses a read-only tool surface. It does not expose
+  `bash`, blocks fabricated mutating tools before router policy, restricts
+  `hf_repo_files` to `list`/`read`, and still consults router policy before
+  execution without passing the approved execution flag.
 - `agent.core.agent_loop._needs_approval(...)` remains as a compatibility shim
   backed by `PolicyEngine.evaluate(...)`.
 - `approval_required` event payloads include tool name, arguments, tool call
@@ -138,12 +146,9 @@ Current behavior:
 
 Current limitations:
 
-- Research subagent isolation remains deferred to `MLJ-TPS-004`. The research
-  handler still has its own allowlist. Its direct router calls are now subject
-  to router policy, but the allowlist and read-only facade still need a focused
-  cleanup.
-- MCP name-collision hardening remains deferred to `MLJ-TPS-005`; generic MCP
-  tools are policy-classified, but allowed-name collisions are still possible.
+- Generic MCP tools remain approval-gated until a narrower policy exists for a
+  specific trusted tool/server.
+- Local and sandbox path/command guardrails are still tracked by `MLJ-TPS-006`.
 
 ## Approvals
 
@@ -170,7 +175,6 @@ Current limitations:
 - Pending approvals are memory-only.
 - The approval center is still UI-first around existing approval flows; richer
   rendering of policy metadata belongs to `MLJ-UX-004`.
-- Research tool read-only isolation is still a separate `MLJ-TPS-004` task.
 
 ## SSE And Backend API
 

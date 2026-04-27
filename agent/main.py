@@ -849,7 +849,12 @@ async def main():
     config = load_config(config_path)
 
     # Create tool router with local mode
-    tool_router = ToolRouter(config.mcpServers, hf_token=hf_token, local_mode=True)
+    tool_router = ToolRouter(
+        config.mcpServers,
+        hf_token=hf_token,
+        local_mode=True,
+        trusted_hf_mcp_servers=config.trusted_hf_mcp_servers,
+    )
 
     # Session holder for interrupt/model/status access
     session_holder = [None]
@@ -1062,7 +1067,12 @@ async def headless_main(
     submission_queue: asyncio.Queue = asyncio.Queue()
     event_queue: asyncio.Queue = asyncio.Queue()
 
-    tool_router = ToolRouter(config.mcpServers, hf_token=hf_token, local_mode=True)
+    tool_router = ToolRouter(
+        config.mcpServers,
+        hf_token=hf_token,
+        local_mode=True,
+        trusted_hf_mcp_servers=config.trusted_hf_mcp_servers,
+    )
     session_holder: list = [None]
 
     agent_task = asyncio.create_task(
