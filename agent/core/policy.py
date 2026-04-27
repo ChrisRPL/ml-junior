@@ -370,18 +370,19 @@ class PolicyEngine:
     def _with_metadata(
         decision: PolicyDecision, metadata: ToolMetadata
     ) -> PolicyDecision:
+        fill_from_metadata = decision.risk == RiskLevel.UNKNOWN
         risk = _coerce_risk(metadata.risk)
-        if risk is not None:
+        if risk is not None and fill_from_metadata:
             decision.risk = risk
-        if metadata.side_effects:
+        if metadata.side_effects and fill_from_metadata:
             decision.side_effects = list(metadata.side_effects)
-        if metadata.rollback is not None:
+        if metadata.rollback is not None and fill_from_metadata:
             decision.rollback = metadata.rollback
-        if metadata.budget_impact is not None:
+        if metadata.budget_impact is not None and fill_from_metadata:
             decision.budget_impact = metadata.budget_impact
-        if metadata.credential_usage:
+        if metadata.credential_usage and not decision.credential_usage:
             decision.credential_usage = list(metadata.credential_usage)
-        if metadata.reason is not None:
+        if metadata.reason is not None and not decision.reason:
             decision.reason = metadata.reason
         return decision
 

@@ -7,6 +7,7 @@ work doesn't pollute the main agent's context window.
 Inspired by claude-code's code-explorer agent pattern.
 """
 
+import copy
 import json
 import logging
 from typing import Any
@@ -29,7 +30,6 @@ _RESEARCH_CONTEXT_MAX = 190_000
 # Tools the research agent can use (read-only subset)
 RESEARCH_TOOL_NAMES = {
     "read",
-    "bash",
     "explore_hf_docs",
     "fetch_hf_docs",
     "find_hf_api",
@@ -40,6 +40,9 @@ RESEARCH_TOOL_NAMES = {
     "hf_inspect_dataset",
     "hf_repo_files",
 }
+
+_RESEARCH_HF_REPO_FILES_OPERATIONS = {"list", "read"}
+_RESEARCH_ALLOWED_POLICY_RISKS = {"read_only", "low"}
 
 RESEARCH_SYSTEM_PROMPT = """\
 You are a research sub-agent for an ML engineering assistant.
@@ -104,7 +107,8 @@ tell you what actually works.
 - `find_hf_api(query=..., tag=...)`: Find REST API endpoints
 
 ## Hub repo inspection
-- `hf_repo_files`: List/read files in any HF repo (model, dataset, space)
+- `hf_repo_files(operation="list"|"read", ...)`: List/read files in any HF repo
+  (model, dataset, space). Upload/delete are not available in research.
 
 # Correct research pattern
 
@@ -222,6 +226,128 @@ def _get_research_model(main_model: str) -> str:
     return main_model
 
 
+def _get_field(value: Any, field: str, default: Any = None) -> Any:
+    if isinstance(value, dict):
+        return value.get(field, default)
+    return getattr(value, field, default)
+
+
+def _plain_policy_value(value: Any) -> str:
+    if hasattr(value, "value"):
+        value = value.value
+    return str(value).strip().lower()
+
+
+def _policy_denied(decision: Any) -> bool:
+    denied = _get_field(decision, "denied", None)
+    if denied is not None:
+        return bool(denied)
+    return not bool(_get_field(decision, "allowed", True))
+
+
+def _policy_requires_approval(decision: Any) -> bool:
+    return bool(
+        _get_field(
+            decision,
+            "requires_approval",
+            _get_field(decision, "needs_approval", False),
+        )
+    )
+
+
+def _policy_risk(decision: Any) -> str:
+    return _plain_policy_value(_get_field(decision, "risk", "unknown"))
+
+
+def _sanitize_hf_repo_files_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    """Expose hf_repo_files as a read-only list/read tool to research."""
+    sanitized = copy.deepcopy(spec)
+    function = sanitized.get("function", {})
+    function["description"] = (
+        "List or read files in Hugging Face repos (models/datasets/spaces). "
+        "Research mode only supports operation='list' and operation='read'."
+    )
+    parameters = function.get("parameters", {})
+    properties = parameters.get("properties", {})
+    if isinstance(properties, dict):
+        operation = properties.get("operation")
+        if isinstance(operation, dict):
+            operation["enum"] = sorted(_RESEARCH_HF_REPO_FILES_OPERATIONS)
+            operation["description"] = "Read-only operation: list or read."
+        for write_only_property in ("content", "patterns", "create_pr", "commit_message"):
+            properties.pop(write_only_property, None)
+    return sanitized
+
+
+def _research_tool_specs(session: Any) -> list[dict[str, Any]]:
+    specs = []
+    for spec in session.tool_router.get_tool_specs_for_llm():
+        tool_name = spec.get("function", {}).get("name")
+        if tool_name not in RESEARCH_TOOL_NAMES:
+            continue
+        if tool_name == "hf_repo_files":
+            spec = _sanitize_hf_repo_files_spec(spec)
+        specs.append(spec)
+    return specs
+
+
+def _local_research_block_reason(tool_name: str, tool_args: dict[str, Any]) -> str | None:
+    if tool_name not in RESEARCH_TOOL_NAMES:
+        return f"Tool '{tool_name}' not available for research. Research tools are read-only."
+
+    if tool_name == "hf_repo_files":
+        operation = tool_args.get("operation")
+        if operation not in _RESEARCH_HF_REPO_FILES_OPERATIONS:
+            return (
+                "hf_repo_files is read-only in research. "
+                "Only operation='list' and operation='read' are available."
+            )
+
+    return None
+
+
+def _policy_block_reason(tool_name: str, decision: Any) -> str | None:
+    if _policy_denied(decision):
+        reason = _get_field(decision, "reason", None)
+        return str(reason or f"Tool '{tool_name}' denied by policy.")
+
+    if _policy_requires_approval(decision):
+        reason = _get_field(decision, "reason", None)
+        return str(reason or f"Tool '{tool_name}' requires approval and cannot run in research.")
+
+    risk = _policy_risk(decision)
+    if risk not in _RESEARCH_ALLOWED_POLICY_RISKS:
+        reason = _get_field(decision, "reason", None)
+        detail = f" effective risk is {risk!r}, expected read-only/low."
+        return str(reason or f"Tool '{tool_name}' blocked by research policy.") + detail
+
+    return None
+
+
+def _evaluate_research_policy(
+    session: Any, tool_name: str, tool_args: dict[str, Any]
+) -> str | None:
+    evaluator = getattr(session.tool_router, "evaluate_policy", None)
+    if evaluator is None:
+        return None
+
+    config = getattr(session, "config", None)
+    errors: list[TypeError] = []
+    for kwargs in (
+        {"config": config, "session": session},
+        {"config": config},
+        {},
+    ):
+        try:
+            decision = evaluator(tool_name, tool_args, **kwargs)
+            return _policy_block_reason(tool_name, decision)
+        except TypeError as e:
+            errors.append(e)
+            continue
+
+    raise errors[-1]
+
+
 async def research_handler(
     arguments: dict[str, Any], session=None, tool_call_id: str | None = None, **_kw
 ) -> tuple[str, bool]:
@@ -259,12 +385,8 @@ async def research_handler(
         reasoning_effort=_capped,
     )
 
-    # Get read-only tool specs from the session's tool router
-    tool_specs = [
-        spec
-        for spec in session.tool_router.get_tool_specs_for_llm()
-        if spec["function"]["name"] in RESEARCH_TOOL_NAMES
-    ]
+    # Get read-only tool specs from the session's tool router.
+    tool_specs = _research_tool_specs(session)
 
     # Unique ID + short label so parallel agents show separate status lines.
     # Use the tool_call_id when available — it's unique per invocation and lets
@@ -404,11 +526,24 @@ async def research_handler(
                 continue
 
             tool_name = tc.function.name
-            if tool_name not in RESEARCH_TOOL_NAMES:
+            block_reason = _local_research_block_reason(tool_name, tool_args)
+            if block_reason is not None:
                 messages.append(
                     Message(
                         role="tool",
-                        content=f"Tool '{tool_name}' not available for research.",
+                        content=block_reason,
+                        tool_call_id=tc.id,
+                        name=tool_name,
+                    )
+                )
+                continue
+
+            policy_block_reason = _evaluate_research_policy(session, tool_name, tool_args)
+            if policy_block_reason is not None:
+                messages.append(
+                    Message(
+                        role="tool",
+                        content=policy_block_reason,
                         tool_call_id=tc.id,
                         name=tool_name,
                     )
