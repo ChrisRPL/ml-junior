@@ -263,9 +263,52 @@ def _make_tool_handler(sandbox_tool_name: str):
 
 def get_sandbox_tools():
     """Return all 5 sandbox ToolSpecs (sandbox_create + 4 operation tools)."""
-    from agent.core.tools import ToolSpec
+    from agent.core.tools import ToolSpec, tool_metadata
 
     tools = []
+    create_metadata = tool_metadata(
+        risk="high",
+        side_effect="remote_compute",
+        rollback="manual",
+        budget="medium",
+        credentials=("hf_token",),
+        source="sandbox",
+    )
+    operation_metadata = {
+        "bash": tool_metadata(
+            risk="high",
+            side_effect="remote_exec",
+            rollback="manual",
+            budget="medium",
+            credentials=("hf_token",),
+            source="sandbox",
+        ),
+        "read": tool_metadata(
+            risk="read_only",
+            side_effect="remote_read",
+            rollback="not_needed",
+            budget="low",
+            credentials=("hf_token",),
+            source="sandbox",
+            read_only=True,
+        ),
+        "write": tool_metadata(
+            risk="medium",
+            side_effect="remote_write",
+            rollback="manual",
+            budget="low",
+            credentials=("hf_token",),
+            source="sandbox",
+        ),
+        "edit": tool_metadata(
+            risk="medium",
+            side_effect="remote_write",
+            rollback="manual",
+            budget="low",
+            credentials=("hf_token",),
+            source="sandbox",
+        ),
+    }
 
     # sandbox_create (explicit creation, requires approval)
     tools.append(
@@ -274,6 +317,7 @@ def get_sandbox_tools():
             description=SANDBOX_CREATE_TOOL_SPEC["description"],
             parameters=SANDBOX_CREATE_TOOL_SPEC["parameters"],
             handler=sandbox_create_handler,
+            metadata=create_metadata,
         )
     )
 
@@ -286,6 +330,7 @@ def get_sandbox_tools():
                 description=spec["description"],
                 parameters=spec["parameters"],
                 handler=_make_tool_handler(name),
+                metadata=operation_metadata.get(name),
             )
         )
 

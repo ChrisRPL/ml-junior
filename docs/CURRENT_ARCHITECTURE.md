@@ -91,26 +91,59 @@ Current behavior:
   content blocks into `agent.core.tool_results.ToolResult`.
 - `ToolResult` carries `display_text`, `success`, optional `ToolError`,
   `ArtifactRef`, `MetricRecord`, `SideEffect`, raw value, and metadata fields.
+- `ToolSpec` carries the LLM-facing name, description, parameters, optional
+  Python handler, and optional policy metadata.
 - Built-ins include research, HF docs, HF papers, dataset inspection, planning,
   HF Jobs, HF repo files/git, GitHub examples/repos/read-file, and either local
   tools or sandbox tools.
 - MCP tools named `hf_jobs`, `hf_doc_search`, `hf_doc_fetch`, and `hf_whoami`
   are skipped to avoid conflicts with built-ins.
-- Tool calls go to a Python handler when present. Otherwise they go through the
-  FastMCP client if initialized.
+- Tool calls are evaluated by router policy before execution. Calls go to a
+  Python handler when present. Otherwise they go through the FastMCP client if
+  initialized.
 - MCP connection failure is non-fatal; the agent continues without MCP tools.
 
 Current limitations:
 
 - Tool availability can change at startup depending on network, MCP, and
   OpenAPI initialization.
-- Approval policy is implemented separately from the router.
 - MCP tools can currently overwrite built-in tools whose names are not in
   `NOT_ALLOWED_TOOL_NAMES`; for example, an MCP tool named `sandbox_create`
   replaces the built-in registration. This is current behavior, not a target
   security property.
 - Existing built-in handlers mostly still return tuples or HF-style dicts; the
   structured model is currently an adapter layer, not a full handler rewrite.
+
+## PolicyEngine And ToolMetadata
+
+Current behavior:
+
+- `agent.core.policy` defines `RiskLevel`, `ToolMetadata`, `PolicyDecision`,
+  and `PolicyEngine.evaluate(...)`.
+- `ToolSpec` carries optional policy metadata. Built-in sandbox/local, HF,
+  GitHub, docs, research, and plan tools are registered with metadata; MCP
+  tools receive generic MCP metadata at registration.
+- `ToolRouter.evaluate_policy(...)` evaluates a registered tool call before
+  execution. `ToolRouter.call_tool_result(...)` denies policy-blocked calls and
+  refuses approval-required calls unless the caller passes the approved
+  execution flag used by `exec_approval`.
+- `agent.core.agent_loop._needs_approval(...)` remains as a compatibility shim
+  backed by `PolicyEngine.evaluate(...)`.
+- `approval_required` event payloads include tool name, arguments, tool call
+  ID, risk, side effects, rollback notes, budget impact, credential usage, and
+  reason. Pending approval session info carries the same additive metadata.
+- `yolo_mode` and compatible autonomy/approval modes skip approval while
+  preserving risk metadata. `confirm_cpu_jobs` and `auto_file_upload` remain
+  policy inputs.
+
+Current limitations:
+
+- Research subagent isolation remains deferred to `MLJ-TPS-004`. The research
+  handler still has its own allowlist. Its direct router calls are now subject
+  to router policy, but the allowlist and read-only facade still need a focused
+  cleanup.
+- MCP name-collision hardening remains deferred to `MLJ-TPS-005`; generic MCP
+  tools are policy-classified, but allowed-name collisions are still possible.
 
 ## Approvals
 
@@ -120,10 +153,11 @@ Current behavior:
 - `sandbox_create` requires approval.
 - `hf_jobs` run operations require approval. CPU jobs can skip approval only
   when `confirm_cpu_jobs` is false.
-- `hf_private_repos.upload_file` requires approval unless `auto_file_upload` is
-  true; repo creation requires approval.
-- `hf_repo_files.upload/delete` and destructive `hf_repo_git` operations require
-  approval.
+- Legacy `hf_private_repos` policy is still modeled for compatibility tests,
+  but that built-in is currently disabled in favor of `hf_repo_files` and
+  `hf_repo_git`.
+- `hf_repo_files.upload/delete`, `hf_repo_git` mutations, local/sandbox
+  shell/write/edit operations, and generic MCP tools require approval.
 - Approval requests are batched in one `approval_required` event and stored as
   `Session.pending_approval`.
 - Approval responses can approve, reject, add feedback, and edit scripts before
@@ -134,8 +168,9 @@ Current behavior:
 Current limitations:
 
 - Pending approvals are memory-only.
-- Local mode file and shell tools are not approval-gated by this policy.
-- The policy only covers the tool names and operations above.
+- The approval center is still UI-first around existing approval flows; richer
+  rendering of policy metadata belongs to `MLJ-UX-004`.
+- Research tool read-only isolation is still a separate `MLJ-TPS-004` task.
 
 ## SSE And Backend API
 

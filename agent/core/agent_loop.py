@@ -3,10 +3,12 @@ Main agent implementation with integrated tool system and MCP support
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any
 
 from litellm import ChatCompletionMessageToolCall, Message, acompletion
 from litellm.exceptions import ContextWindowExceededError
@@ -14,10 +16,10 @@ from litellm.exceptions import ContextWindowExceededError
 from agent.config import Config
 from agent.core.doom_loop import check_for_doom_loop
 from agent.core.llm_params import _resolve_llm_params
+from agent.core.policy import PolicyDecision, PolicyEngine, RiskLevel, ToolMetadata
 from agent.core.prompt_caching import with_prompt_caching
 from agent.core.session import Event, OpType, Session
 from agent.core.tools import ToolRouter
-from agent.tools.jobs_tool import CPU_FLAVORS
 
 logger = logging.getLogger(__name__)
 
@@ -46,74 +48,173 @@ def _validate_tool_args(tool_args: dict) -> tuple[bool, str | None]:
     return True, None
 
 
+def _policy_value(value: Any, default: str = "none") -> str:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value
+    enum_value = getattr(value, "value", None)
+    if enum_value is not None:
+        return str(enum_value)
+    enum_name = getattr(value, "name", None)
+    if enum_name is not None:
+        return str(enum_name).lower()
+    return str(value)
+
+
+def _policy_values(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(_policy_value(item) for item in value)
+    return (_policy_value(value),)
+
+
+def _policy_get(source: Any, *names: str, default: Any = None) -> Any:
+    if source is None:
+        return default
+    if isinstance(source, dict):
+        for name in names:
+            if name in source:
+                return source[name]
+        return default
+    for name in names:
+        if hasattr(source, name):
+            return getattr(source, name)
+    return default
+
+
+def _normalize_policy_decision(raw_decision: Any, tool_name: str) -> PolicyDecision:
+    if isinstance(raw_decision, PolicyDecision):
+        return raw_decision
+
+    if isinstance(raw_decision, bool):
+        reason = (
+            "Router policy requires approval."
+            if raw_decision
+            else "Router policy allows autonomous execution."
+        )
+        return PolicyDecision(
+            requires_approval=raw_decision,
+            risk=RiskLevel.MEDIUM if raw_decision else RiskLevel.READ_ONLY,
+            side_effects=["external_service"] if raw_decision else [],
+            rollback="unknown" if raw_decision else "not_needed",
+            budget_impact="unknown" if raw_decision else "none",
+            reason=reason,
+        )
+
+    metadata = _policy_get(raw_decision, "metadata", "tool_metadata", default=None)
+    metadata_source = metadata or raw_decision
+    requires_approval = bool(
+        _policy_get(
+            raw_decision,
+            "requires_approval",
+            "approval_required",
+            "needs_approval",
+            default=False,
+        )
+    )
+    reason = _policy_get(
+        raw_decision,
+        "reason",
+        default=_policy_get(
+            metadata_source,
+            "reason",
+            default=(
+                "Policy requires approval."
+                if requires_approval
+                else "Policy allows autonomous execution."
+            ),
+        ),
+    )
+    side_effects = _policy_get(
+        metadata_source,
+        "side_effects",
+        "side_effect",
+        "side_effect_level",
+        default=(),
+    )
+    budget = _policy_get(
+        metadata_source,
+        "budget_impact",
+        "budget",
+        default="unknown" if requires_approval else "none",
+    )
+    credentials = _policy_get(
+        metadata_source,
+        "credential_usage",
+        "credential",
+        "credentials",
+        default=(),
+    )
+    denied = bool(_policy_get(raw_decision, "denied", default=False))
+    allowed = bool(_policy_get(raw_decision, "allowed", default=not denied))
+    code = _policy_get(raw_decision, "code", default=None)
+    risk_value = _policy_value(
+        _policy_get(
+            metadata_source,
+            "risk",
+            default="medium" if requires_approval else "read_only",
+        ),
+        default="unknown",
+    )
+    try:
+        risk = RiskLevel(risk_value)
+    except ValueError:
+        risk = RiskLevel.UNKNOWN
+
+    return PolicyDecision(
+        requires_approval=requires_approval,
+        risk=risk,
+        allowed=allowed,
+        side_effects=list(_policy_values(side_effects)),
+        rollback=_policy_value(
+            _policy_get(
+                metadata_source,
+                "rollback",
+                "rollback_support",
+                default="unknown" if requires_approval else "not_needed",
+            )
+        ),
+        budget_impact=_policy_value(budget),
+        credential_usage=list(_policy_values(credentials)),
+        reason=str(reason),
+        code=code,
+    )
+
+
+async def _evaluate_tool_policy(
+    tool_router: ToolRouter | None,
+    tool_name: str,
+    tool_args: dict,
+    config: Config | None,
+) -> PolicyDecision:
+    evaluator = getattr(tool_router, "evaluate_policy", None)
+    if evaluator is not None:
+        try:
+            raw_decision = evaluator(tool_name, tool_args, config=config)
+        except TypeError:
+            raw_decision = evaluator(tool_name, tool_args, config)
+        if inspect.isawaitable(raw_decision):
+            raw_decision = await raw_decision
+        return _normalize_policy_decision(raw_decision, tool_name)
+
+    if hasattr(tool_router, "tools") or tool_router is None:
+        return PolicyEngine.evaluate(tool_name, tool_args, config)
+
+    return PolicyDecision(
+        requires_approval=False,
+        risk=RiskLevel.READ_ONLY,
+        reason="router has no policy hook; compatibility auto-execute.",
+    )
+
+
 def _needs_approval(
     tool_name: str, tool_args: dict, config: Config | None = None
 ) -> bool:
-    """Check if a tool call requires user approval before execution."""
-    # Yolo mode: skip all approvals
-    if config and config.yolo_mode:
-        return False
+    """Compatibility wrapper for legacy tests/importers."""
+    return PolicyEngine.evaluate(tool_name, tool_args, config).requires_approval
 
-    # If args are malformed, skip approval (validation error will be shown later)
-    args_valid, _ = _validate_tool_args(tool_args)
-    if not args_valid:
-        return False
-
-    if tool_name == "sandbox_create":
-        return True
-
-    if tool_name == "hf_jobs":
-        operation = tool_args.get("operation", "")
-        if operation not in ["run", "uv", "scheduled run", "scheduled uv"]:
-            return False
-
-        # Check if this is a CPU-only job
-        # hardware_flavor is at top level of tool_args, not nested in args
-        hardware_flavor = (
-            tool_args.get("hardware_flavor")
-            or tool_args.get("flavor")
-            or tool_args.get("hardware")
-            or "cpu-basic"
-        )
-        is_cpu_job = hardware_flavor in CPU_FLAVORS
-
-        if is_cpu_job:
-            if config and not config.confirm_cpu_jobs:
-                return False
-            return True
-
-        return True
-
-    # Check for file upload operations (hf_private_repos or other tools)
-    if tool_name == "hf_private_repos":
-        operation = tool_args.get("operation", "")
-        if operation == "upload_file":
-            if config and config.auto_file_upload:
-                return False
-            return True
-        # Other operations (create_repo, etc.) always require approval
-        if operation in ["create_repo"]:
-            return True
-
-    # hf_repo_files: upload (can overwrite) and delete require approval
-    if tool_name == "hf_repo_files":
-        operation = tool_args.get("operation", "")
-        if operation in ["upload", "delete"]:
-            return True
-
-    # hf_repo_git: destructive operations require approval
-    if tool_name == "hf_repo_git":
-        operation = tool_args.get("operation", "")
-        if operation in [
-            "delete_branch",
-            "delete_tag",
-            "merge_pr",
-            "create_repo",
-            "update_repo",
-        ]:
-            return True
-
-    return False
 
 
 # -- LLM retry constants --------------------------------------------------
@@ -718,12 +819,22 @@ class Handlers:
                 if session.is_cancelled:
                     break
 
-                # Separate good tools into approval-required vs auto-execute
-                approval_required_tools: list[tuple[ToolCall, str, dict]] = []
+                # Evaluate policy before separating approval-required vs auto-execute.
+                approval_required_tools: list[
+                    tuple[ToolCall, str, dict, PolicyDecision]
+                ] = []
                 non_approval_tools: list[tuple[ToolCall, str, dict]] = []
                 for tc, tool_name, tool_args in good_tools:
-                    if _needs_approval(tool_name, tool_args, session.config):
-                        approval_required_tools.append((tc, tool_name, tool_args))
+                    policy_decision = await _evaluate_tool_policy(
+                        session.tool_router,
+                        tool_name,
+                        tool_args,
+                        session.config,
+                    )
+                    if policy_decision.requires_approval:
+                        approval_required_tools.append(
+                            (tc, tool_name, tool_args, policy_decision)
+                        )
                     else:
                         non_approval_tools.append((tc, tool_name, tool_args))
 
@@ -826,7 +937,8 @@ class Handlers:
                 if approval_required_tools:
                     # Prepare batch approval data
                     tools_data = []
-                    for tc, tool_name, tool_args in approval_required_tools:
+                    policy_by_tool_call_id = {}
+                    for tc, tool_name, tool_args, policy_decision in approval_required_tools:
                         # Resolve sandbox file paths for hf_jobs scripts so the
                         # frontend can display & edit the actual file content.
                         if tool_name == "hf_jobs" and isinstance(tool_args.get("script"), str):
@@ -836,10 +948,13 @@ class Handlers:
                             if resolved:
                                 tool_args = {**tool_args, "script": resolved}
 
+                        policy_metadata = policy_decision.approval_metadata()
+                        policy_by_tool_call_id[tc.id] = policy_metadata
                         tools_data.append({
                             "tool": tool_name,
                             "arguments": tool_args,
                             "tool_call_id": tc.id,
+                            **policy_metadata,
                         })
 
                     await session.send_event(Event(
@@ -849,7 +964,8 @@ class Handlers:
 
                     # Store all approval-requiring tools (ToolCall objects for execution)
                     session.pending_approval = {
-                        "tool_calls": [tc for tc, _, _ in approval_required_tools],
+                        "tool_calls": [tc for tc, _, _, _ in approval_required_tools],
+                        "policy": policy_by_tool_call_id,
                     }
 
                     # Return early - wait for EXEC_APPROVAL operation
@@ -1031,9 +1147,21 @@ class Handlers:
                 )
             )
 
-            output, success = await session.tool_router.call_tool(
-                tool_name, tool_args, session=session, tool_call_id=tc.id
-            )
+            try:
+                output, success = await session.tool_router.call_tool(
+                    tool_name,
+                    tool_args,
+                    session=session,
+                    tool_call_id=tc.id,
+                    policy_approved=True,
+                )
+            except TypeError:
+                output, success = await session.tool_router.call_tool(
+                    tool_name,
+                    tool_args,
+                    session=session,
+                    tool_call_id=tc.id,
+                )
 
             return (tc, tool_name, output, success, was_edited)
 

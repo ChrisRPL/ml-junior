@@ -73,6 +73,12 @@ class PendingApprovalTool(BaseModel):
     tool: str
     tool_call_id: str
     arguments: dict[str, Any] = {}
+    risk: str | None = None
+    side_effects: list[str] = []
+    rollback: str | None = None
+    budget_impact: str | None = None
+    credential_usage: list[str] = []
+    reason: str | None = None
 
 
 class SessionInfo(BaseModel):

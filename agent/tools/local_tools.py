@@ -408,9 +408,48 @@ _HANDLERS = {
 
 def get_local_tools():
     """Return local ToolSpecs for bash/read/write/edit (no sandbox_create)."""
-    from agent.core.tools import ToolSpec
+    from agent.core.tools import ToolSpec, tool_metadata
 
     tools = []
+    metadata_by_name = {
+        "bash": tool_metadata(
+            risk="high",
+            side_effect="local_exec",
+            rollback="manual",
+            budget="medium",
+            credentials=("local_system",),
+            source="local",
+            local=True,
+        ),
+        "read": tool_metadata(
+            risk="read_only",
+            side_effect="local_read",
+            rollback="not_needed",
+            budget="none",
+            credentials=("local_filesystem",),
+            source="local",
+            read_only=True,
+            local=True,
+        ),
+        "write": tool_metadata(
+            risk="high",
+            side_effect="local_write",
+            rollback="manual",
+            budget="low",
+            credentials=("local_filesystem",),
+            source="local",
+            local=True,
+        ),
+        "edit": tool_metadata(
+            risk="medium",
+            side_effect="local_write",
+            rollback="manual",
+            budget="low",
+            credentials=("local_filesystem",),
+            source="local",
+            local=True,
+        ),
+    }
     for name, spec in _LOCAL_TOOL_SPECS.items():
         handler = _HANDLERS.get(name)
         if handler is None:
@@ -421,6 +460,7 @@ def get_local_tools():
                 description=spec["description"],
                 parameters=spec["parameters"],
                 handler=handler,
+                metadata=metadata_by_name.get(name),
             )
         )
     return tools

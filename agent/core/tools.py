@@ -5,7 +5,8 @@ Provides ToolSpec and ToolRouter for managing both built-in and MCP tools
 
 import logging
 import warnings
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
+from enum import Enum
 from typing import Any, Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,305 @@ warnings.filterwarnings(
 NOT_ALLOWED_TOOL_NAMES = ["hf_jobs", "hf_doc_search", "hf_doc_fetch", "hf_whoami"]
 
 
+class _FallbackRiskLevel(str, Enum):
+    NONE = "none"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class _FallbackSideEffectLevel(str, Enum):
+    NONE = "none"
+    AGENT_STATE = "agent_state"
+    LOCAL_READ = "local_read"
+    LOCAL_WRITE = "local_write"
+    LOCAL_EXEC = "local_exec"
+    NETWORK_READ = "network_read"
+    REMOTE_READ = "remote_read"
+    REMOTE_WRITE = "remote_write"
+    REMOTE_EXEC = "remote_exec"
+    REMOTE_COMPUTE = "remote_compute"
+    EXTERNAL_SERVICE = "external_service"
+
+
+class _FallbackRollbackSupport(str, Enum):
+    NOT_NEEDED = "not_needed"
+    REPLACEABLE = "replaceable"
+    MANUAL = "manual"
+    PARTIAL = "partial"
+    UNKNOWN = "unknown"
+
+
+class _FallbackBudgetImpact(str, Enum):
+    NONE = "none"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    UNKNOWN = "unknown"
+
+
+class _FallbackCredentialScope(str, Enum):
+    NONE = "none"
+    LOCAL_FILESYSTEM = "local_filesystem"
+    LOCAL_SYSTEM = "local_system"
+    HF_TOKEN = "hf_token"
+    GITHUB_TOKEN = "github_token"
+    MODEL_PROVIDER = "model_provider"
+    MCP_SERVER = "mcp_server"
+
+
+@dataclass(frozen=True)
+class _FallbackToolMetadata:
+    risk: Any
+    side_effect: Any
+    rollback: Any
+    budget: Any
+    credentials: tuple[Any, ...] = ()
+
+    @property
+    def credential(self) -> tuple[Any, ...]:
+        return self.credentials
+
+
+@dataclass(frozen=True)
+class _FallbackPolicyDecision:
+    allowed: bool = True
+    requires_approval: bool = False
+    reason: str | None = None
+    code: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    @property
+    def denied(self) -> bool:
+        return not self.allowed
+
+
+try:
+    from agent.core import policy as _policy
+except ImportError:
+    _policy = None
+
+RiskLevel = getattr(_policy, "RiskLevel", _FallbackRiskLevel)
+SideEffectLevel = getattr(_policy, "SideEffectLevel", _FallbackSideEffectLevel)
+RollbackSupport = getattr(_policy, "RollbackSupport", _FallbackRollbackSupport)
+BudgetImpact = getattr(_policy, "BudgetImpact", _FallbackBudgetImpact)
+CredentialScope = getattr(_policy, "CredentialScope", _FallbackCredentialScope)
+ToolMetadata = getattr(_policy, "ToolMetadata", _FallbackToolMetadata)
+PolicyDecision = getattr(_policy, "PolicyDecision", _FallbackPolicyDecision)
+
+
+def _coerce_policy_value(policy_type: Any, value: str) -> Any:
+    """Use policy enum/core values when available; keep strings as fallback."""
+    if value == "none" and hasattr(policy_type, "READ_ONLY"):
+        value = "read_only"
+    try:
+        return policy_type(value)
+    except Exception:
+        try:
+            return getattr(policy_type, value.upper())
+        except Exception:
+            return value
+
+
+def tool_metadata(
+    *,
+    risk: str,
+    side_effect: str,
+    rollback: str,
+    budget: str,
+    credentials: tuple[str, ...] = (),
+    source: str | None = None,
+    read_only: bool | None = None,
+    local: bool | None = None,
+    reason: str | None = None,
+) -> Any:
+    values = {
+        "risk": _coerce_policy_value(RiskLevel, risk),
+        "side_effect": _coerce_policy_value(SideEffectLevel, side_effect),
+        "rollback": _coerce_policy_value(RollbackSupport, rollback),
+        "budget": _coerce_policy_value(BudgetImpact, budget),
+        "credentials": tuple(
+            _coerce_policy_value(CredentialScope, credential)
+            for credential in credentials
+        ),
+    }
+    policy_values = {
+        "source": source,
+        "read_only": read_only,
+        "local": local,
+        "risk": values["risk"],
+        "side_effects": [] if side_effect == "none" else [side_effect],
+        "rollback": rollback,
+        "budget_impact": budget,
+        "credential_usage": list(credentials),
+        "reason": reason,
+    }
+
+    for candidate in (
+        {key: value for key, value in policy_values.items() if value is not None},
+        values,
+        {**values, "credential": values["credentials"]},
+        {**values, "side_effects": values["side_effect"]},
+    ):
+        try:
+            return ToolMetadata(**candidate)
+        except Exception:
+            continue
+    return _FallbackToolMetadata(**values)
+
+
+def policy_decision(
+    *,
+    allowed: bool = True,
+    requires_approval: bool = False,
+    reason: str | None = None,
+    code: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Any:
+    values = {
+        "allowed": allowed,
+        "requires_approval": requires_approval,
+        "reason": reason,
+        "code": code,
+        "metadata": metadata or {},
+    }
+    for candidate in (
+        values,
+        {key: value for key, value in values.items() if key != "code"},
+        {**values, "is_allowed": allowed},
+    ):
+        try:
+            return PolicyDecision(**candidate)
+        except Exception:
+            continue
+    return _FallbackPolicyDecision(**values)
+
+
+def _plain_value(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if is_dataclass(value):
+        return asdict(value)
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if isinstance(value, tuple):
+        return [_plain_value(item) for item in value]
+    if isinstance(value, list):
+        return [_plain_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _plain_value(item) for key, item in value.items()}
+    return value
+
+
+def _metadata_field(metadata: Any, field: str, default: Any = None) -> Any:
+    if metadata is None:
+        return default
+    if isinstance(metadata, dict):
+        return metadata.get(field, default)
+    return getattr(metadata, field, default)
+
+
+def _decision_field(decision: Any, field: str, default: Any = None) -> Any:
+    if isinstance(decision, dict):
+        return decision.get(field, default)
+    return getattr(decision, field, default)
+
+
+def _decision_denied(decision: Any) -> bool:
+    denied = _decision_field(decision, "denied", None)
+    if denied is not None:
+        return bool(denied)
+    allowed = _decision_field(decision, "allowed", True)
+    return not bool(allowed)
+
+
+def _decision_requires_approval(decision: Any) -> bool:
+    return bool(
+        _decision_field(
+            decision,
+            "requires_approval",
+            _decision_field(decision, "needs_approval", False),
+        )
+    )
+
+
+def _policy_error_metadata(decision: Any, tool_name: str) -> dict[str, Any]:
+    return {
+        "tool_name": tool_name,
+        "policy_decision": _plain_value(decision),
+    }
+
+
+BUILTIN_DEFAULT_METADATA = tool_metadata(
+    risk="medium",
+    side_effect="external_service",
+    rollback="unknown",
+    budget="unknown",
+    credentials=(),
+)
+MCP_DEFAULT_METADATA = tool_metadata(
+    risk="unknown",
+    side_effect="external_service",
+    rollback="unknown",
+    budget="unknown",
+    credentials=("mcp_server",),
+    source="mcp",
+)
+RESEARCH_METADATA = tool_metadata(
+    risk="read_only",
+    side_effect="network_read",
+    rollback="not_needed",
+    budget="medium",
+    credentials=("model_provider", "hf_token", "github_token"),
+    read_only=True,
+)
+DOCS_METADATA = tool_metadata(
+    risk="read_only",
+    side_effect="network_read",
+    rollback="not_needed",
+    budget="low",
+    credentials=(),
+    read_only=True,
+)
+PLAN_METADATA = tool_metadata(
+    risk="low",
+    side_effect="agent_state",
+    rollback="replaceable",
+    budget="none",
+    credentials=(),
+)
+HF_READ_METADATA = tool_metadata(
+    risk="read_only",
+    side_effect="network_read",
+    rollback="not_needed",
+    budget="low",
+    credentials=("hf_token",),
+    read_only=True,
+)
+HF_JOBS_METADATA = tool_metadata(
+    risk="high",
+    side_effect="remote_compute",
+    rollback="manual",
+    budget="high",
+    credentials=("hf_token",),
+)
+HF_REPO_WRITE_METADATA = tool_metadata(
+    risk="high",
+    side_effect="remote_write",
+    rollback="partial",
+    budget="low",
+    credentials=("hf_token",),
+)
+GITHUB_READ_METADATA = tool_metadata(
+    risk="read_only",
+    side_effect="network_read",
+    rollback="not_needed",
+    budget="low",
+    credentials=("github_token",),
+    read_only=True,
+)
+
+
 def convert_mcp_content_to_string(content: list) -> str:
     """
     Convert MCP content blocks to a string format compatible with LLM messages.
@@ -126,6 +426,141 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]
     handler: Optional[Callable[..., Awaitable[Any]]] = None
+    metadata: Optional[Any] = None
+
+
+class DefaultToolPolicyEngine:
+    """Default router-boundary policy for registered tools.
+
+    The default policy is intentionally conservative about denial: it exposes
+    approval requirements but only denies calls when metadata or a delegated
+    policy engine explicitly marks the call as blocked.
+    """
+
+    def __init__(self, delegate: Any | None = None) -> None:
+        self.delegate = delegate if delegate is not None else self._make_delegate()
+
+    def evaluate(
+        self,
+        *,
+        tool: ToolSpec,
+        arguments: dict[str, Any],
+        session: Any = None,
+        config: Any = None,
+    ) -> Any:
+        delegated = self._evaluate_delegate(
+            tool=tool,
+            arguments=arguments,
+            session=session,
+            config=config,
+        )
+        if delegated is not None:
+            if isinstance(delegated, bool):
+                return policy_decision(allowed=delegated)
+            return delegated
+
+        metadata = tool.metadata or BUILTIN_DEFAULT_METADATA
+        risk = str(_plain_value(_metadata_field(metadata, "risk", "medium")))
+        deny = bool(_metadata_field(metadata, "deny", False)) or risk in {
+            "blocked",
+            "denied",
+            "forbidden",
+        }
+        reason = _metadata_field(metadata, "reason", None)
+        if deny:
+            return policy_decision(
+                allowed=False,
+                requires_approval=False,
+                reason=reason or f"Tool call denied by policy: {tool.name}",
+                code="tool_policy_denied",
+                metadata={"tool_metadata": _plain_value(metadata)},
+            )
+
+        return policy_decision(
+            allowed=True,
+            requires_approval=self._requires_approval(tool, arguments, risk),
+            reason=reason,
+            metadata={"tool_metadata": _plain_value(metadata)},
+        )
+
+    def _make_delegate(self) -> Any | None:
+        if _policy is None:
+            return None
+        for name in ("DefaultToolPolicyEngine", "DefaultPolicyEngine", "PolicyEngine"):
+            engine_cls = getattr(_policy, name, None)
+            if engine_cls is None:
+                continue
+            try:
+                return engine_cls()
+            except Exception:
+                logger.debug("Failed to initialize policy engine %s", name, exc_info=True)
+        return None
+
+    def _evaluate_delegate(
+        self,
+        *,
+        tool: ToolSpec,
+        arguments: dict[str, Any],
+        session: Any = None,
+        config: Any = None,
+    ) -> Any | None:
+        if self.delegate is None:
+            return None
+        for method_name in ("evaluate_tool_call", "evaluate"):
+            method = getattr(self.delegate, method_name, None)
+            if method is None:
+                continue
+            for kwargs in (
+                {"tool": tool, "arguments": arguments, "session": session},
+                {"tool_spec": tool, "arguments": arguments, "session": session},
+                {
+                    "tool_name": tool.name,
+                    "tool_args": arguments,
+                    "config": config,
+                    "metadata": tool.metadata,
+                },
+                {
+                    "tool_name": tool.name,
+                    "arguments": arguments,
+                    "metadata": tool.metadata,
+                    "session": session,
+                    "config": config,
+                },
+            ):
+                try:
+                    return method(**kwargs)
+                except TypeError:
+                    continue
+        return None
+
+    def _requires_approval(
+        self,
+        tool: ToolSpec,
+        arguments: dict[str, Any],
+        risk: str,
+    ) -> bool:
+        if bool(_metadata_field(tool.metadata, "requires_approval", False)):
+            return True
+        if tool.name == "sandbox_create":
+            return True
+        if tool.name == "hf_jobs":
+            return arguments.get("operation", "") in {
+                "run",
+                "uv",
+                "scheduled run",
+                "scheduled uv",
+            }
+        if tool.name == "hf_repo_files":
+            return arguments.get("operation", "") in {"upload", "delete"}
+        if tool.name == "hf_repo_git":
+            return arguments.get("operation", "") in {
+                "delete_branch",
+                "delete_tag",
+                "merge_pr",
+                "create_repo",
+                "update_repo",
+            }
+        return risk == "high"
 
 
 class ToolRouter:
@@ -134,9 +569,16 @@ class ToolRouter:
     Based on codex-rs/core/src/tools/router.rs
     """
 
-    def __init__(self, mcp_servers: dict[str, MCPServerConfig], hf_token: str | None = None, local_mode: bool = False):
+    def __init__(
+        self,
+        mcp_servers: dict[str, MCPServerConfig],
+        hf_token: str | None = None,
+        local_mode: bool = False,
+        policy_engine: Any | None = None,
+    ):
         self.tools: dict[str, ToolSpec] = {}
         self.mcp_servers: dict[str, dict[str, Any]] = {}
+        self.policy_engine = policy_engine or DefaultToolPolicyEngine()
 
         for tool in create_builtin_tools(local_mode=local_mode):
             self.register_tool(tool)
@@ -170,6 +612,7 @@ class ToolRouter:
                     description=tool.description,
                     parameters=tool.inputSchema,
                     handler=None,
+                    metadata=MCP_DEFAULT_METADATA,
                 )
             )
         logger.info(
@@ -191,6 +634,7 @@ class ToolRouter:
                     description=openapi_spec["description"],
                     parameters=openapi_spec["parameters"],
                     handler=search_openapi_handler,
+                    metadata=DOCS_METADATA,
                 )
             )
             logger.info(f"Loaded OpenAPI search tool: {openapi_spec['name']}")
@@ -212,6 +656,77 @@ class ToolRouter:
                 }
             )
         return specs
+
+    def evaluate_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        session: Any = None,
+        config: Any = None,
+    ) -> Any:
+        tool = self.tools.get(tool_name)
+        if tool is None:
+            return policy_decision(
+                allowed=False,
+                requires_approval=False,
+                reason=f"Unknown tool: {tool_name}",
+                code="unknown_tool",
+            )
+        try:
+            return self.policy_engine.evaluate(
+                tool=tool,
+                arguments=arguments,
+                session=session,
+                config=config,
+            )
+        except TypeError:
+            return self.policy_engine.evaluate(
+                tool=tool,
+                arguments=arguments,
+                session=session,
+            )
+
+    def evaluate_policy(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        config: Any = None,
+        session: Any = None,
+    ) -> Any:
+        return self.evaluate_tool_call(
+            tool_name,
+            tool_args,
+            session=session,
+            config=config,
+        )
+
+    def evaluate_unregistered_mcp_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        session: Any = None,
+        config: Any = None,
+    ) -> Any:
+        tool = ToolSpec(
+            name=tool_name,
+            description="Unregistered MCP tool",
+            parameters={"type": "object", "properties": {}},
+            handler=None,
+            metadata=MCP_DEFAULT_METADATA,
+        )
+        try:
+            return self.policy_engine.evaluate(
+                tool=tool,
+                arguments=arguments,
+                session=session,
+                config=config,
+            )
+        except TypeError:
+            return self.policy_engine.evaluate(
+                tool=tool,
+                arguments=arguments,
+                session=session,
+            )
 
     async def __aenter__(self) -> "ToolRouter":
         if self.mcp_client is not None:
@@ -242,6 +757,7 @@ class ToolRouter:
         arguments: dict[str, Any],
         session: Any = None,
         tool_call_id: str | None = None,
+        policy_approved: bool = False,
     ) -> tuple[str, bool]:
         """
         Call a tool and return (output_string, success_bool).
@@ -254,6 +770,7 @@ class ToolRouter:
             arguments,
             session=session,
             tool_call_id=tool_call_id,
+            policy_approved=policy_approved,
         )
         return result.to_legacy_tuple()
 
@@ -263,6 +780,7 @@ class ToolRouter:
         arguments: dict[str, Any],
         session: Any = None,
         tool_call_id: str | None = None,
+        policy_approved: bool = False,
     ) -> ToolResult:
         """
         Call a tool and return a structured ToolResult.
@@ -271,6 +789,53 @@ class ToolRouter:
         compatibility API for existing agent-loop consumers.
         """
         tool = self.tools.get(tool_name)
+        if tool is not None:
+            decision = self.evaluate_tool_call(
+                tool_name,
+                arguments,
+                session=session,
+                config=getattr(session, "config", None),
+            )
+        elif self._mcp_initialized:
+            decision = self.evaluate_unregistered_mcp_tool_call(
+                tool_name,
+                arguments,
+                session=session,
+                config=getattr(session, "config", None),
+            )
+        else:
+            decision = None
+
+        if decision is not None and _decision_denied(decision):
+            reason = _decision_field(
+                decision,
+                "reason",
+                f"Tool call denied by policy: {tool_name}",
+            )
+            code = _decision_field(decision, "code", "tool_policy_denied")
+            return ToolResult.from_error(
+                str(reason),
+                code=code,
+                kind="policy",
+                metadata=_policy_error_metadata(decision, tool_name),
+            )
+        if (
+            decision is not None
+            and _decision_requires_approval(decision)
+            and not policy_approved
+        ):
+            reason = _decision_field(
+                decision,
+                "reason",
+                f"Tool call requires approval before execution: {tool_name}",
+            )
+            return ToolResult.from_error(
+                str(reason),
+                code="tool_policy_approval_required",
+                kind="policy",
+                metadata=_policy_error_metadata(decision, tool_name),
+            )
+
         if tool and tool.handler:
             result = await self._call_handler(
                 tool.handler,
@@ -340,6 +905,7 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             description=RESEARCH_TOOL_SPEC["description"],
             parameters=RESEARCH_TOOL_SPEC["parameters"],
             handler=research_handler,
+            metadata=RESEARCH_METADATA,
         ),
         # Documentation search tools
         ToolSpec(
@@ -347,12 +913,14 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             description=EXPLORE_HF_DOCS_TOOL_SPEC["description"],
             parameters=EXPLORE_HF_DOCS_TOOL_SPEC["parameters"],
             handler=explore_hf_docs_handler,
+            metadata=DOCS_METADATA,
         ),
         ToolSpec(
             name=HF_DOCS_FETCH_TOOL_SPEC["name"],
             description=HF_DOCS_FETCH_TOOL_SPEC["description"],
             parameters=HF_DOCS_FETCH_TOOL_SPEC["parameters"],
             handler=hf_docs_fetch_handler,
+            metadata=DOCS_METADATA,
         ),
         # Paper discovery and reading
         ToolSpec(
@@ -360,6 +928,7 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             description=HF_PAPERS_TOOL_SPEC["description"],
             parameters=HF_PAPERS_TOOL_SPEC["parameters"],
             handler=hf_papers_handler,
+            metadata=DOCS_METADATA,
         ),
         # Dataset inspection tool (unified)
         ToolSpec(
@@ -367,6 +936,7 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             description=HF_INSPECT_DATASET_TOOL_SPEC["description"],
             parameters=HF_INSPECT_DATASET_TOOL_SPEC["parameters"],
             handler=hf_inspect_dataset_handler,
+            metadata=HF_READ_METADATA,
         ),
         # Planning and job management tools
         ToolSpec(
@@ -374,12 +944,14 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             description=PLAN_TOOL_SPEC["description"],
             parameters=PLAN_TOOL_SPEC["parameters"],
             handler=plan_tool_handler,
+            metadata=PLAN_METADATA,
         ),
         ToolSpec(
             name=HF_JOBS_TOOL_SPEC["name"],
             description=HF_JOBS_TOOL_SPEC["description"],
             parameters=HF_JOBS_TOOL_SPEC["parameters"],
             handler=hf_jobs_handler,
+            metadata=HF_JOBS_METADATA,
         ),
         # HF Repo management tools
         ToolSpec(
@@ -387,30 +959,35 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             description=HF_REPO_FILES_TOOL_SPEC["description"],
             parameters=HF_REPO_FILES_TOOL_SPEC["parameters"],
             handler=hf_repo_files_handler,
+            metadata=HF_REPO_WRITE_METADATA,
         ),
         ToolSpec(
             name=HF_REPO_GIT_TOOL_SPEC["name"],
             description=HF_REPO_GIT_TOOL_SPEC["description"],
             parameters=HF_REPO_GIT_TOOL_SPEC["parameters"],
             handler=hf_repo_git_handler,
+            metadata=HF_REPO_WRITE_METADATA,
         ),
         ToolSpec(
             name=GITHUB_FIND_EXAMPLES_TOOL_SPEC["name"],
             description=GITHUB_FIND_EXAMPLES_TOOL_SPEC["description"],
             parameters=GITHUB_FIND_EXAMPLES_TOOL_SPEC["parameters"],
             handler=github_find_examples_handler,
+            metadata=GITHUB_READ_METADATA,
         ),
         ToolSpec(
             name=GITHUB_LIST_REPOS_TOOL_SPEC["name"],
             description=GITHUB_LIST_REPOS_TOOL_SPEC["description"],
             parameters=GITHUB_LIST_REPOS_TOOL_SPEC["parameters"],
             handler=github_list_repos_handler,
+            metadata=GITHUB_READ_METADATA,
         ),
         ToolSpec(
             name=GITHUB_READ_FILE_TOOL_SPEC["name"],
             description=GITHUB_READ_FILE_TOOL_SPEC["description"],
             parameters=GITHUB_READ_FILE_TOOL_SPEC["parameters"],
             handler=github_read_file_handler,
+            metadata=GITHUB_READ_METADATA,
         ),
     ]
 
@@ -420,6 +997,10 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
         tools = get_local_tools() + tools
     else:
         tools = get_sandbox_tools() + tools
+
+    for tool in tools:
+        if tool.metadata is None:
+            tool.metadata = BUILTIN_DEFAULT_METADATA
 
     tool_names = ", ".join([t.name for t in tools])
     logger.info(f"Loaded {len(tools)} built-in tools: {tool_names}")

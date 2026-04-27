@@ -508,16 +508,19 @@ class SessionManager:
         pa = agent_session.session.pending_approval
         if pa and pa.get("tool_calls"):
             pending_approval = []
+            policy_by_tool_call_id = pa.get("policy") or {}
             for tc in pa["tool_calls"]:
                 import json
                 try:
                     args = json.loads(tc.function.arguments)
                 except (json.JSONDecodeError, AttributeError):
                     args = {}
+                policy = policy_by_tool_call_id.get(tc.id) or {}
                 pending_approval.append({
                     "tool": tc.function.name,
                     "tool_call_id": tc.id,
                     "arguments": args,
+                    **policy,
                 })
 
         return {

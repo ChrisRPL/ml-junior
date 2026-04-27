@@ -224,7 +224,19 @@ def test_pending_approval_is_included_in_session_info(manager):
     fake_session = SimpleNamespace(
         config=SimpleNamespace(model_name="test/model"),
         context_manager=SimpleNamespace(items=["user", "assistant"]),
-        pending_approval={"tool_calls": [tool_call]},
+        pending_approval={
+            "tool_calls": [tool_call],
+            "policy": {
+                "tc_123": {
+                    "risk": "medium",
+                    "side_effects": ["remote_compute"],
+                    "rollback": "Cancel the job.",
+                    "budget_impact": "May incur CPU compute costs.",
+                    "credential_usage": ["hf_token"],
+                    "reason": "CPU job launch requires approval.",
+                }
+            },
+        },
     )
     manager.sessions["session-a"] = session_module.AgentSession(
         session_id="session-a",
@@ -243,6 +255,12 @@ def test_pending_approval_is_included_in_session_info(manager):
             "tool": "hf_jobs",
             "tool_call_id": "tc_123",
             "arguments": {"operation": "run", "hardware": "cpu-basic"},
+            "risk": "medium",
+            "side_effects": ["remote_compute"],
+            "rollback": "Cancel the job.",
+            "budget_impact": "May incur CPU compute costs.",
+            "credential_usage": ["hf_token"],
+            "reason": "CPU job launch requires approval.",
         }
     ]
 
