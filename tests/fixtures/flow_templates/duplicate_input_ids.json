@@ -1,0 +1,29 @@
+{
+  "id": "duplicate-inputs",
+  "name": "Duplicate Inputs",
+  "version": "v1",
+  "inputs": [
+    {
+      "id": "paper_url",
+      "type": "string",
+      "required": true
+    },
+    {
+      "id": "paper_url",
+      "type": "string",
+      "required": false
+    }
+  ],
+  "phases": [
+    {
+      "id": "intake",
+      "name": "Intake",
+      "objective": "Capture the task inputs.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": [],
+      "approval_points": [],
+      "verifiers": []
+    }
+  ]
+}

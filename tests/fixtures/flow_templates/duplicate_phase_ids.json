@@ -1,0 +1,27 @@
+{
+  "id": "duplicate-phases",
+  "name": "Duplicate Phases",
+  "version": "v1",
+  "phases": [
+    {
+      "id": "train",
+      "name": "Train A",
+      "objective": "Train the first model.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": [],
+      "approval_points": [],
+      "verifiers": []
+    },
+    {
+      "id": "train",
+      "name": "Train B",
+      "objective": "Train the second model.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": [],
+      "approval_points": [],
+      "verifiers": []
+    }
+  ]
+}

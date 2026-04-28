@@ -1,0 +1,88 @@
+{
+  "id": "mnist-baseline",
+  "name": "MNIST Baseline",
+  "version": "v1",
+  "description": "Train and evaluate a small image classifier.",
+  "inputs": [
+    {
+      "id": "metric",
+      "type": "string",
+      "required": true,
+      "default": "accuracy",
+      "description": "Primary validation metric."
+    },
+    {
+      "id": "epochs",
+      "type": "integer",
+      "required": false,
+      "default": 3,
+      "description": "Training epoch count."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 4,
+    "max_runs": 2,
+    "max_wall_clock_hours": 8,
+    "max_llm_usd": 1.25
+  },
+  "permissions": [
+    {
+      "id": "hf-token",
+      "risk": "low",
+      "action": "read",
+      "target": "huggingface-profile",
+      "description": "Read the configured Hugging Face identity."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "gpu-run",
+      "risk": "medium",
+      "action": "launch",
+      "target": "huggingface-job",
+      "description": "Start a remote GPU job."
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "metrics-json",
+      "type": "json",
+      "description": "Evaluation metrics.",
+      "required": true
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "model-card",
+      "type": "markdown",
+      "description": "Model card draft.",
+      "required": true
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "accuracy-threshold",
+      "type": "metric",
+      "description": "Accuracy is present and above the configured threshold.",
+      "required": true
+    }
+  ],
+  "phases": [
+    {
+      "id": "train",
+      "name": "Train",
+      "objective": "Train a baseline model and capture metrics.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": [
+        "metrics-json"
+      ],
+      "approval_points": [
+        "gpu-run"
+      ],
+      "verifiers": [
+        "accuracy-threshold"
+      ]
+    }
+  ]
+}

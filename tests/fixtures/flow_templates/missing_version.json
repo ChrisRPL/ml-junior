@@ -1,0 +1,16 @@
+{
+  "id": "missing-version",
+  "name": "Missing Version",
+  "phases": [
+    {
+      "id": "prepare",
+      "name": "Prepare",
+      "objective": "Prepare inputs.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": [],
+      "approval_points": [],
+      "verifiers": []
+    }
+  ]
+}
