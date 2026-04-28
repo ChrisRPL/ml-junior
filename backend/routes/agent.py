@@ -28,6 +28,7 @@ from models import (
     SessionResponse,
     SubmitRequest,
     TruncateRequest,
+    WorkflowState,
 )
 from session_manager import (
     MAX_SESSIONS,
@@ -445,6 +446,15 @@ async def get_session(
     _check_session_access(session_id, user)
     info = session_manager.get_session_info(session_id)
     return SessionInfo(**info)
+
+
+@router.get("/session/{session_id}/workflow", response_model=WorkflowState)
+async def get_session_workflow(
+    session_id: str, user: dict = Depends(get_current_user)
+) -> WorkflowState:
+    """Return a read-only workflow projection for an accessible session."""
+    _check_session_access(session_id, user)
+    return session_manager.get_workflow_state(session_id)
 
 
 @router.get(

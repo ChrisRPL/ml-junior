@@ -1,7 +1,7 @@
 """Pydantic models for API requests and responses."""
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -83,6 +83,84 @@ class OperationResponse(BaseModel):
     error_redaction_status: str
     created_at: str
     updated_at: str
+
+
+class WorkflowObjective(BaseModel):
+    """Projected workflow objective metadata."""
+
+    text: str | None = None
+    source: Literal["placeholder", "event", "durable"] = "placeholder"
+    updated_at: str | None = None
+
+
+class PhaseState(BaseModel):
+    """Compatibility phase state until explicit workflow phases exist."""
+
+    id: str
+    label: str
+    status: Literal["placeholder", "pending", "active", "blocked", "complete", "failed"]
+    started_at: str | None = None
+    updated_at: str | None = None
+
+
+class WorkflowPlanItem(BaseModel):
+    """Projected plan item from plan_update events."""
+
+    id: str
+    content: str
+    status: str
+    source_event_sequence: int | None = None
+    updated_at: str | None = None
+
+
+class WorkflowResumeState(BaseModel):
+    """Resume cursor metadata. Executable resume is intentionally absent."""
+
+    event_sequence: int
+    can_resume: bool = False
+    reason: Literal["executable_resume_not_implemented"] = (
+        "executable_resume_not_implemented"
+    )
+
+
+class WorkflowCompatibility(BaseModel):
+    """Explicit placeholders for future workflow producers."""
+
+    stale: bool
+    missing_producers: list[str]
+
+
+class WorkflowState(BaseModel):
+    """Read-only workflow projection returned by the backend API."""
+
+    snapshot_version: Literal[1] = 1
+    session_id: str
+    project_id: str
+    status: Literal[
+        "idle",
+        "processing",
+        "waiting_approval",
+        "blocked",
+        "error",
+        "interrupted",
+        "completed",
+        "stale",
+    ]
+    objective: WorkflowObjective
+    phase: PhaseState
+    plan: list[WorkflowPlanItem]
+    blockers: list[dict[str, Any]]
+    pending_approvals: list[dict[str, Any]]
+    active_jobs: list[dict[str, Any]]
+    operation_refs: list[dict[str, Any]]
+    human_requests: list[dict[str, Any]]
+    budget: dict[str, Any]
+    evidence_summary: dict[str, Any]
+    live_tracking_refs: list[dict[str, Any]]
+    resume: WorkflowResumeState
+    compatibility: WorkflowCompatibility
+    last_event_sequence: int
+    updated_at: str | None = None
 
 
 class PendingApprovalTool(BaseModel):

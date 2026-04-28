@@ -30,6 +30,7 @@ from backend.session_store import (
     SQLiteSessionStore,
     SessionRecord,
 )
+from backend.workflow_state import build_workflow_state
 
 # Get project root (parent of backend directory)
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -662,8 +663,17 @@ class SessionManager:
         return self.event_store.replay(session_id, after_sequence=after_sequence)
 
     def list_operations(self, session_id: str) -> list[OperationRecord]:
-        """Return redacted operation records for an active in-memory session."""
+        """Return redacted operation records for a durable session."""
         return self.operation_store.list_by_session(session_id)
+
+    def get_workflow_state(self, session_id: str) -> Any:
+        """Return a read-only workflow projection for a durable session."""
+        return build_workflow_state(
+            session_id=session_id,
+            events=self.event_store.replay(session_id),
+            session_record=self.session_store.get(session_id),
+            operations=self.operation_store.list_by_session(session_id),
+        )
 
     def get_operation(
         self, session_id: str, operation_id: str
