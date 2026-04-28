@@ -15,11 +15,19 @@ from agent.core.events import AgentEvent
 from agent.core.session import Event, OpType, Session
 from agent.core.tools import ToolRouter
 from backend.event_store import SQLiteEventStore
+from backend.operation_store import (
+    OPERATION_FAILED,
+    OPERATION_PENDING,
+    OPERATION_RUNNING,
+    OPERATION_SUCCEEDED,
+    SQLiteOperationStore,
+)
 
 # Get project root (parent of backend directory)
 PROJECT_ROOT = Path(__file__).parent.parent
 DEFAULT_CONFIG_PATH = str(PROJECT_ROOT / "configs" / "main_agent_config.json")
 DEFAULT_EVENT_STORE_PATH = PROJECT_ROOT / "session_logs" / "events.sqlite3"
+DEFAULT_OPERATION_STORE_PATH = PROJECT_ROOT / "session_logs" / "operations.sqlite3"
 
 
 # These dataclasses match agent/main.py structure
@@ -155,6 +163,8 @@ class SessionManager:
         config_path: str | None = None,
         event_store: SQLiteEventStore | None = None,
         event_store_path: str | Path | None = None,
+        operation_store: SQLiteOperationStore | None = None,
+        operation_store_path: str | Path | None = None,
     ) -> None:
         self.config = load_config(config_path or DEFAULT_CONFIG_PATH)
         self._event_store = event_store
@@ -162,6 +172,12 @@ class SessionManager:
             event_store_path
             or os.environ.get("MLJ_EVENT_STORE_PATH")
             or DEFAULT_EVENT_STORE_PATH
+        )
+        self._operation_store = operation_store
+        self._operation_store_path = (
+            operation_store_path
+            or os.environ.get("MLJ_OPERATION_STORE_PATH")
+            or DEFAULT_OPERATION_STORE_PATH
         )
         self.sessions: dict[str, AgentSession] = {}
         self._lock = asyncio.Lock()
@@ -171,6 +187,57 @@ class SessionManager:
         if self._event_store is None:
             self._event_store = SQLiteEventStore(self._event_store_path)
         return self._event_store
+
+    @property
+    def operation_store(self) -> SQLiteOperationStore:
+        if self._operation_store is None:
+            self._operation_store = SQLiteOperationStore(self._operation_store_path)
+        return self._operation_store
+
+    @staticmethod
+    def _operation_type(operation: Operation) -> str:
+        return getattr(operation.op_type, "value", str(operation.op_type))
+
+    @staticmethod
+    def _operation_payload(operation: Operation) -> dict[str, Any]:
+        return operation.data or {}
+
+    def _create_operation_record(
+        self,
+        session_id: str,
+        operation: Operation,
+        *,
+        status: str = OPERATION_PENDING,
+    ) -> str:
+        operation_id = f"op_{uuid.uuid4().hex}"
+        self.operation_store.create(
+            operation_id=operation_id,
+            session_id=session_id,
+            operation_type=self._operation_type(operation),
+            payload=self._operation_payload(operation),
+            status=status,
+        )
+        return operation_id
+
+    def _transition_operation(
+        self,
+        operation_id: str,
+        status: str,
+        *,
+        result: Any = None,
+        error: Any = None,
+        include_result: bool = False,
+        include_error: bool = False,
+    ) -> None:
+        kwargs: dict[str, Any] = {}
+        if include_result:
+            kwargs["result"] = result
+        if include_error:
+            kwargs["error"] = error
+        try:
+            self.operation_store.transition_status(operation_id, status, **kwargs)
+        except Exception as e:
+            logger.warning("Operation record update failed for %s: %s", operation_id, e)
 
     def _count_user_sessions(self, user_id: str) -> int:
         """Count active sessions owned by a specific user."""
@@ -379,6 +446,7 @@ class SessionManager:
                 )
 
                 while session.is_running:
+                    submission: Submission | None = None
                     try:
                         # Wait for submission with timeout to allow checking is_running
                         submission = await asyncio.wait_for(
@@ -386,7 +454,17 @@ class SessionManager:
                         )
                         agent_session.is_processing = True
                         try:
+                            self._transition_operation(
+                                submission.id,
+                                OPERATION_RUNNING,
+                            )
                             should_continue = await process_submission(session, submission)
+                            self._transition_operation(
+                                submission.id,
+                                OPERATION_SUCCEEDED,
+                                result={"should_continue": should_continue},
+                                include_result=True,
+                            )
                         finally:
                             agent_session.is_processing = False
                         if not should_continue:
@@ -398,6 +476,16 @@ class SessionManager:
                         break
                     except Exception as e:
                         logger.error(f"Error in session {session_id}: {e}")
+                        if submission is not None:
+                            self._transition_operation(
+                                submission.id,
+                                OPERATION_FAILED,
+                                error={
+                                    "type": type(e).__name__,
+                                    "message": str(e),
+                                },
+                                include_error=True,
+                            )
                         await session.send_event(
                             Event(event_type="error", data={"error": str(e)})
                         )
@@ -426,7 +514,8 @@ class SessionManager:
             logger.warning(f"Session {session_id} not found or inactive")
             return False
 
-        submission = Submission(id=f"sub_{uuid.uuid4().hex[:8]}", operation=operation)
+        operation_id = self._create_operation_record(session_id, operation)
+        submission = Submission(id=operation_id, operation=operation)
         await agent_session.submission_queue.put(submission)
         return True
 
@@ -458,7 +547,15 @@ class SessionManager:
         agent_session = self.sessions.get(session_id)
         if not agent_session or not agent_session.is_active:
             return False
+        operation = Operation(op_type=OpType.INTERRUPT)
+        operation_id = self._create_operation_record(session_id, operation)
         agent_session.session.cancel()
+        self._transition_operation(
+            operation_id,
+            OPERATION_SUCCEEDED,
+            result={"cancelled": True},
+            include_result=True,
+        )
         return True
 
     async def undo(self, session_id: str) -> bool:
@@ -472,7 +569,33 @@ class SessionManager:
             agent_session = self.sessions.get(session_id)
         if not agent_session or not agent_session.is_active:
             return False
-        return agent_session.session.context_manager.truncate_to_user_message(user_message_index)
+        operation = Operation(
+            op_type="truncate",
+            data={"action": "truncate", "user_message_index": user_message_index},
+        )
+        operation_id = self._create_operation_record(session_id, operation)
+        success = agent_session.session.context_manager.truncate_to_user_message(
+            user_message_index
+        )
+        if success:
+            self._transition_operation(
+                operation_id,
+                OPERATION_SUCCEEDED,
+                result={"truncated": True, "user_message_index": user_message_index},
+                include_result=True,
+            )
+        else:
+            self._transition_operation(
+                operation_id,
+                OPERATION_FAILED,
+                error={
+                    "type": "IndexError",
+                    "message": "message index out of range",
+                    "user_message_index": user_message_index,
+                },
+                include_error=True,
+            )
+        return success
 
     async def compact(self, session_id: str) -> bool:
         """Compact context in a session."""
