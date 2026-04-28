@@ -20,6 +20,7 @@ import type { User } from '@/types/agent';
 import type { AgentEvent } from '@/types/events';
 import type { ProjectSnapshot } from '@/types/project';
 import { reduceProjectSnapshotEvent } from '@/lib/project-projection';
+import { chooseHydratedProjectSnapshot } from '@/lib/project-snapshot-api';
 
 export interface PlanItem {
   id: string;
@@ -389,14 +390,16 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
   setProjectSnapshot: (sessionId, snapshot) => {
     set((state) => {
       const projectSnapshots = { ...state.projectSnapshots };
-      if (snapshot) {
-        projectSnapshots[sessionId] = snapshot;
+      const current = state.projectSnapshots[sessionId] ?? null;
+      const nextSnapshot = snapshot ? chooseHydratedProjectSnapshot(current, snapshot) : null;
+      if (nextSnapshot) {
+        projectSnapshots[sessionId] = nextSnapshot;
       } else {
         delete projectSnapshots[sessionId];
       }
       return {
         projectSnapshots,
-        ...(state.activeSessionId === sessionId ? { activeProjectSnapshot: snapshot } : {}),
+        ...(state.activeSessionId === sessionId ? { activeProjectSnapshot: nextSnapshot } : {}),
       };
     });
   },

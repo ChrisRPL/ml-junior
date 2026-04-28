@@ -17,6 +17,7 @@ import { buildEventStreamPath } from '@/lib/sse-event-cursors';
 import { createEventCursorFilterStream, createSSEParserStream } from '@/lib/sse-event-stream';
 import { saveResearch, loadResearch, clearResearch, RESEARCH_MAX_STEPS } from '@/lib/research-store';
 import { llmMessagesToUIMessages } from '@/lib/convert-llm-messages';
+import { fetchProjectSnapshot, snapshotFromHydrationFailure } from '@/lib/project-snapshot-api';
 import { apiFetch } from '@/utils/api';
 import { useAgentStore } from '@/store/agentStore';
 import { useSessionStore } from '@/store/sessionStore';
@@ -411,14 +412,16 @@ export function useAgentChat({ sessionId, isActive, onReady, onError, onSessionD
 
         if (msgsRes.ok) {
           const data = await msgsRes.json();
-          if (cancelled || !Array.isArray(data) || data.length === 0) return;
-          // Cache the raw backend messages so we can restore this session
-          // into a fresh backend if the Space restarts.
-          saveBackendMessages(sessionId, data);
-          const uiMsgs = llmMessagesToUIMessages(data, pendingIds, chatActionsRef.current.messages);
-          if (uiMsgs.length > 0) {
-            chat.setMessages(uiMsgs);
-            saveMessages(sessionId, uiMsgs);
+          if (cancelled) return;
+          if (Array.isArray(data) && data.length > 0) {
+            // Cache the raw backend messages so we can restore this session
+            // into a fresh backend if the Space restarts.
+            saveBackendMessages(sessionId, data);
+            const uiMsgs = llmMessagesToUIMessages(data, pendingIds, chatActionsRef.current.messages);
+            if (uiMsgs.length > 0) {
+              chat.setMessages(uiMsgs);
+              saveMessages(sessionId, uiMsgs);
+            }
           }
         }
 
@@ -446,6 +449,19 @@ export function useAgentChat({ sessionId, isActive, onReady, onError, onSessionD
           clearResearch(sessionId);
         } else {
           clearResearch(sessionId);
+        }
+
+        const workflow = await fetchProjectSnapshot(sessionId, apiFetch);
+        if (cancelled) return;
+        if (workflow.ok) {
+          useAgentStore.getState().setProjectSnapshot(sessionId, workflow.snapshot);
+        } else {
+          const current = useAgentStore.getState().getProjectSnapshot(sessionId);
+          useAgentStore.getState().setProjectSnapshot(
+            sessionId,
+            snapshotFromHydrationFailure(sessionId, current, workflow.warning),
+          );
+          logger.warn('Project snapshot hydration fallback:', workflow.warning, workflow.status ?? '');
         }
       } catch {
         /* backend unreachable -- localStorage fallback is fine */
