@@ -15,6 +15,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from agent.tools.local_guardrails import (
+    check_local_path,
+    check_local_work_dir,
+    classify_shell_command,
+)
+
 
 MAX_OUTPUT_CHARS = 25_000
 MAX_LINE_LENGTH = 4000
@@ -98,6 +104,12 @@ async def _bash_handler(args: dict[str, Any], **_kw) -> tuple[str, bool]:
     if not command:
         return "No command provided.", False
     work_dir = args.get("work_dir", ".")
+    work_dir_guard = check_local_work_dir(work_dir)
+    if not work_dir_guard.allowed:
+        return f"Policy denied: {work_dir_guard.reason}", False
+    command_risk = classify_shell_command(command)
+    if command_risk is not None:
+        return f"Policy denied: {command_risk.reason}", False
     timeout = min(args.get("timeout") or DEFAULT_TIMEOUT, MAX_TIMEOUT)
     try:
         result = subprocess.run(
@@ -105,7 +117,7 @@ async def _bash_handler(args: dict[str, Any], **_kw) -> tuple[str, bool]:
             shell=True,
             capture_output=True,
             text=True,
-            cwd=work_dir,
+            cwd=work_dir_guard.path,
             timeout=timeout,
         )
         output = _strip_ansi(result.stdout + result.stderr)
@@ -130,7 +142,10 @@ async def _read_handler(args: dict[str, Any], **_kw) -> tuple[str, bool]:
     file_path = args.get("path", "")
     if not file_path:
         return "No path provided.", False
-    p = Path(file_path)
+    path_guard = check_local_path(file_path, operation="read")
+    if not path_guard.allowed:
+        return f"Policy denied: {path_guard.reason}", False
+    p = Path(path_guard.path or file_path)
     if not p.exists():
         return f"File not found: {file_path}", False
     if p.is_dir():
@@ -140,7 +155,7 @@ async def _read_handler(args: dict[str, Any], **_kw) -> tuple[str, bool]:
     except Exception as e:
         return f"read error: {e}", False
 
-    _files_read.add(_resolve_path(file_path))
+    _files_read.add(_resolve_path(str(p)))
 
     lines = raw_content.splitlines()
     offset = max((args.get("offset") or 1), 1)
@@ -161,15 +176,18 @@ async def _write_handler(args: dict[str, Any], **_kw) -> tuple[str, bool]:
     content = args.get("content", "")
     if not file_path:
         return "No path provided.", False
-    p = Path(file_path)
-    if p.exists() and _resolve_path(file_path) not in _files_read:
+    path_guard = check_local_path(file_path, operation="write")
+    if not path_guard.allowed:
+        return f"Policy denied: {path_guard.reason}", False
+    p = Path(path_guard.path or file_path)
+    if p.exists() and _resolve_path(str(p)) not in _files_read:
         return (
             f"You must read {file_path} before overwriting it. "
             f"Use the read tool first to see current contents."
         ), False
     try:
         _atomic_write(p, content)
-        _files_read.add(_resolve_path(file_path))
+        _files_read.add(_resolve_path(str(p)))
         msg = f"Wrote {len(content)} bytes to {file_path}"
         # Syntax validation for Python files
         if p.suffix == ".py":
@@ -196,10 +214,13 @@ async def _edit_handler(args: dict[str, Any], **_kw) -> tuple[str, bool]:
     if old_str == new_str:
         return "old_str and new_str must differ.", False
 
-    p = Path(file_path)
+    path_guard = check_local_path(file_path, operation="edit")
+    if not path_guard.allowed:
+        return f"Policy denied: {path_guard.reason}", False
+    p = Path(path_guard.path or file_path)
     if not p.exists():
         return f"File not found: {file_path}", False
-    if _resolve_path(file_path) not in _files_read:
+    if _resolve_path(str(p)) not in _files_read:
         return (
             f"You must read {file_path} before editing it. "
             f"Use the read tool first to see current contents."

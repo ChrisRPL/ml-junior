@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any
 
 from agent.tools.jobs_tool import CPU_FLAVORS
+from agent.tools.local_guardrails import evaluate_local_policy_failure
 
 
 class RiskLevel(str, Enum):
@@ -140,7 +141,7 @@ class PolicyEngine:
         decision = cls._evaluate_valid_args(tool_name, tool_args, config, metadata)
         decision = cls._with_metadata(decision, metadata)
 
-        if _auto_approval_enabled(config):
+        if decision.allowed and _auto_approval_enabled(config):
             decision.requires_approval = False
             decision.reason = f"Auto-approved by yolo/autonomy mode. {decision.reason}".strip()
 
@@ -185,6 +186,25 @@ class PolicyEngine:
                 rollback="Replace the plan with a later plan update.",
                 budget_impact="None.",
                 reason="Agent plan state update.",
+            )
+
+        local_policy_failure = evaluate_local_policy_failure(
+            tool_name,
+            tool_args,
+            config=config,
+            is_local_tool=metadata.local is True or metadata.source == "local",
+        )
+        if local_policy_failure is not None:
+            return PolicyDecision(
+                requires_approval=False,
+                risk=RiskLevel(local_policy_failure.risk),
+                allowed=False,
+                side_effects=list(local_policy_failure.side_effects),
+                rollback="None needed; command was not executed.",
+                budget_impact="None.",
+                credential_usage=list(local_policy_failure.credential_usage),
+                reason=local_policy_failure.reason,
+                code=local_policy_failure.code,
             )
 
         if tool_name in cls.READ_ONLY_TOOLS or metadata.read_only is True:
