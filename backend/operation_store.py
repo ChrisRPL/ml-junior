@@ -78,6 +78,25 @@ class OperationRecord:
     error_redaction_status: str = REDACTION_NONE
 
 
+def serialize_operation_record(record: OperationRecord) -> dict[str, Any]:
+    """Return the public API shape for a redacted operation record."""
+    return {
+        "id": record.id,
+        "session_id": record.session_id,
+        "type": record.operation_type,
+        "status": record.status,
+        "idempotency_key": record.idempotency_key,
+        "payload": record.payload,
+        "result": record.result,
+        "error": record.error,
+        "payload_redaction_status": record.payload_redaction_status,
+        "result_redaction_status": record.result_redaction_status,
+        "error_redaction_status": record.error_redaction_status,
+        "created_at": record.created_at.isoformat(),
+        "updated_at": record.updated_at.isoformat(),
+    }
+
+
 class SQLiteOperationStore:
     """SQLite store for durable operation records."""
 

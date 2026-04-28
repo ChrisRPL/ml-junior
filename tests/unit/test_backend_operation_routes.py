@@ -103,6 +103,7 @@ def _install_session(
     manager: session_module.SessionManager,
     *,
     session_id: str = "session-a",
+    user_id: str = "alice",
     truncate_result: bool = True,
 ) -> tuple[FakeSession, FakeBroadcaster]:
     fake_session = FakeSession(truncate_result=truncate_result)
@@ -112,7 +113,7 @@ def _install_session(
         session=fake_session,
         tool_router=FakeToolRouter(),
         submission_queue=asyncio.Queue(),
-        user_id="alice",
+        user_id=user_id,
         broadcaster=broadcaster,
     )
     return fake_session, broadcaster
@@ -247,6 +248,118 @@ async def test_route_actions_create_durable_operation_records_and_keep_responses
 
     assert hf_secret not in database_dump
     assert github_secret not in database_dump
+
+
+async def test_operation_query_api_returns_redacted_session_scoped_records(
+    operation_manager,
+    monkeypatch,
+):
+    manager, store, _database_path = operation_manager
+    fake_session, _broadcaster = _install_session(manager)
+    _install_session(manager, session_id="session-b")
+    monkeypatch.setattr(agent_routes, "session_manager", manager)
+
+    hf_secret = "hf_operationsecret123456789"
+    first = store.create(
+        operation_id="op-1",
+        session_id="session-a",
+        operation_type="user_input",
+        idempotency_key="idem-1",
+        payload={"text": f"use {hf_secret}"},
+    )
+    store.transition_status(
+        first.id,
+        OPERATION_FAILED,
+        error={"message": f"HF_TOKEN={hf_secret}"},
+    )
+    store.create(
+        operation_id="op-other",
+        session_id="session-b",
+        operation_type="user_input",
+        payload={"text": "other session"},
+    )
+
+    assert await manager.interrupt("session-a") is True
+    assert fake_session.cancelled is True
+
+    responses = await agent_routes.list_session_operations(
+        "session-a",
+        {"user_id": "alice", "plan": "free"},
+    )
+    payloads = [response.model_dump() for response in responses]
+
+    assert len(payloads) == 2
+    assert payloads[0]["id"] == "op-1"
+    assert payloads[1]["id"].startswith("op_")
+    assert [payload["session_id"] for payload in payloads] == [
+        "session-a",
+        "session-a",
+    ]
+    assert [payload["type"] for payload in payloads] == ["user_input", "interrupt"]
+    assert payloads[0]["status"] == OPERATION_FAILED
+    assert payloads[0]["idempotency_key"] == "idem-1"
+    assert payloads[0]["payload"] == {"text": "use [REDACTED]"}
+    assert payloads[0]["error"] == {"message": "HF_TOKEN=[REDACTED]"}
+    assert payloads[0]["payload_redaction_status"] == "partial"
+    assert payloads[0]["error_redaction_status"] == "partial"
+    assert payloads[0]["result_redaction_status"] == "none"
+    assert payloads[0]["created_at"]
+    assert payloads[0]["updated_at"]
+    assert payloads[1]["status"] == OPERATION_SUCCEEDED
+    assert payloads[1]["result"] == {"cancelled": True}
+
+    detail = await agent_routes.get_session_operation(
+        "session-a",
+        "op-1",
+        {"user_id": "alice", "plan": "free"},
+    )
+    assert detail.model_dump() == payloads[0]
+
+
+async def test_operation_query_api_rejects_wrong_owner_inactive_and_wrong_session(
+    operation_manager,
+    monkeypatch,
+):
+    manager, store, _database_path = operation_manager
+    _install_session(manager)
+    _install_session(manager, session_id="session-b")
+    monkeypatch.setattr(agent_routes, "session_manager", manager)
+    store.create(
+        operation_id="op-b",
+        session_id="session-b",
+        operation_type="user_input",
+        payload={"text": "hello"},
+    )
+
+    with pytest.raises(HTTPException) as wrong_owner:
+        await agent_routes.list_session_operations(
+            "session-a",
+            {"user_id": "bob", "plan": "free"},
+        )
+    assert wrong_owner.value.status_code == 403
+
+    with pytest.raises(HTTPException) as wrong_session:
+        await agent_routes.get_session_operation(
+            "session-a",
+            "op-b",
+            {"user_id": "alice", "plan": "free"},
+        )
+    assert wrong_session.value.status_code == 404
+
+    with pytest.raises(HTTPException) as missing:
+        await agent_routes.list_session_operations(
+            "missing-session",
+            {"user_id": "alice", "plan": "free"},
+        )
+    assert missing.value.status_code == 404
+
+    manager.sessions["session-a"].is_active = False
+    with pytest.raises(HTTPException) as inactive:
+        await agent_routes.list_session_operations(
+            "session-a",
+            {"user_id": "alice", "plan": "free"},
+        )
+    assert inactive.value.status_code == 404
 
 
 async def test_inactive_session_routes_keep_404_without_operation_record(

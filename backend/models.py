@@ -67,6 +67,24 @@ class SessionResponse(BaseModel):
     ready: bool = True
 
 
+class OperationResponse(BaseModel):
+    """Redacted durable operation record returned by session-scoped APIs."""
+
+    id: str
+    session_id: str
+    type: str
+    status: str
+    idempotency_key: str | None = None
+    payload: Any
+    result: Any | None = None
+    error: Any | None = None
+    payload_redaction_status: str
+    result_redaction_status: str
+    error_redaction_status: str
+    created_at: str
+    updated_at: str
+
+
 class PendingApprovalTool(BaseModel):
     """A tool waiting for user approval."""
 

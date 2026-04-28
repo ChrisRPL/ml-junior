@@ -23,6 +23,7 @@ from models import (
     ApprovalRequest,
     HealthResponse,
     LLMHealthResponse,
+    OperationResponse,
     SessionInfo,
     SessionResponse,
     SubmitRequest,
@@ -35,6 +36,7 @@ from session_manager import (
     event_to_legacy_dict,
     session_manager,
 )
+from backend.operation_store import serialize_operation_record
 
 import user_quotas
 
@@ -150,6 +152,13 @@ def _check_session_access(session_id: str, user: dict[str, Any]) -> None:
         raise HTTPException(status_code=404, detail="Session not found")
     if not session_manager.verify_session_access(session_id, user["user_id"]):
         raise HTTPException(status_code=403, detail="Access denied to this session")
+
+
+def _check_active_session(session_id: str) -> None:
+    """Verify the session is still active. Raises 404."""
+    info = session_manager.get_session_info(session_id)
+    if not info or not info.get("is_active"):
+        raise HTTPException(status_code=404, detail="Session not found or inactive")
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -398,6 +407,40 @@ async def get_session(
     _check_session_access(session_id, user)
     info = session_manager.get_session_info(session_id)
     return SessionInfo(**info)
+
+
+@router.get(
+    "/session/{session_id}/operations",
+    response_model=list[OperationResponse],
+)
+async def list_session_operations(
+    session_id: str, user: dict = Depends(get_current_user)
+) -> list[OperationResponse]:
+    """List redacted durable operations for an active session."""
+    _check_session_access(session_id, user)
+    _check_active_session(session_id)
+    return [
+        OperationResponse(**serialize_operation_record(record))
+        for record in session_manager.list_operations(session_id)
+    ]
+
+
+@router.get(
+    "/session/{session_id}/operations/{operation_id}",
+    response_model=OperationResponse,
+)
+async def get_session_operation(
+    session_id: str,
+    operation_id: str,
+    user: dict = Depends(get_current_user),
+) -> OperationResponse:
+    """Return one redacted durable operation scoped to its active session."""
+    _check_session_access(session_id, user)
+    _check_active_session(session_id)
+    record = session_manager.get_operation(session_id, operation_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    return OperationResponse(**serialize_operation_record(record))
 
 
 @router.post("/session/{session_id}/model")

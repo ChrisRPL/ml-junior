@@ -20,6 +20,7 @@ from backend.operation_store import (
     OPERATION_PENDING,
     OPERATION_RUNNING,
     OPERATION_SUCCEEDED,
+    OperationRecord,
     SQLiteOperationStore,
 )
 
@@ -541,6 +542,19 @@ class SessionManager:
     ) -> list[AgentEvent]:
         """Replay persisted session events after the given sequence cursor."""
         return self.event_store.replay(session_id, after_sequence=after_sequence)
+
+    def list_operations(self, session_id: str) -> list[OperationRecord]:
+        """Return redacted operation records for an active in-memory session."""
+        return self.operation_store.list_by_session(session_id)
+
+    def get_operation(
+        self, session_id: str, operation_id: str
+    ) -> OperationRecord | None:
+        """Return one redacted operation if it belongs to the requested session."""
+        record = self.operation_store.get(operation_id)
+        if record is None or record.session_id != session_id:
+            return None
+        return record
 
     async def interrupt(self, session_id: str) -> bool:
         """Interrupt a session by signalling cancellation directly (bypasses queue)."""
