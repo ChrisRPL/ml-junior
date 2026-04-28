@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Iterable
 
+from agent.core.command_catalog import build_command_registry
+
 
 @dataclass(frozen=True, slots=True)
 class CommandSpec:
@@ -18,10 +20,15 @@ class CommandSpec:
     mutates_state: bool = False
     aliases: tuple[str, ...] = ()
     implemented: bool = True
+    group: str = "core"
 
     @property
     def usage(self) -> str:
         return f"{self.name} {self.arguments}".strip()
+
+    @property
+    def status(self) -> str:
+        return "implemented" if self.implemented else "planned"
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,113 +42,7 @@ class ParsedCommand:
     suggestions: tuple[CommandSpec, ...] = ()
 
 
-COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
-    CommandSpec(
-        name="/help",
-        description="Show this help",
-        risk_level="safe",
-        mutates_state=False,
-    ),
-    CommandSpec(
-        name="/undo",
-        description="Undo last turn",
-        risk_level="medium",
-        mutates_state=True,
-    ),
-    CommandSpec(
-        name="/compact",
-        description="Compact context window",
-        risk_level="medium",
-        mutates_state=True,
-    ),
-    CommandSpec(
-        name="/model",
-        description="Show available models or switch",
-        arguments="[id]",
-        risk_level="low",
-        mutates_state=True,
-    ),
-    CommandSpec(
-        name="/effort",
-        description="Reasoning effort (minimal|low|medium|high|xhigh|max|off)",
-        arguments="[level]",
-        risk_level="low",
-        mutates_state=True,
-    ),
-    CommandSpec(
-        name="/yolo",
-        description="Toggle auto-approve mode",
-        risk_level="high",
-        mutates_state=True,
-    ),
-    CommandSpec(
-        name="/status",
-        description="Current model & turn count",
-        risk_level="safe",
-        mutates_state=False,
-    ),
-    CommandSpec(
-        name="/quit",
-        description="Exit",
-        risk_level="safe",
-        mutates_state=False,
-        aliases=("/exit", "quit", "exit"),
-    ),
-    CommandSpec(
-        name="/flows",
-        description="List saved flows and flow commands",
-        risk_level="safe",
-        mutates_state=False,
-        implemented=False,
-    ),
-    CommandSpec(
-        name="/flow preview",
-        description="Preview a flow before running it",
-        arguments="<flow>",
-        risk_level="low",
-        mutates_state=False,
-        implemented=False,
-    ),
-    CommandSpec(
-        name="/budget",
-        description="Show or set budget controls",
-        arguments="[limit]",
-        risk_level="medium",
-        mutates_state=True,
-        implemented=False,
-    ),
-    CommandSpec(
-        name="/experiments",
-        description="Manage experiment flags",
-        arguments="[name] [on|off]",
-        risk_level="medium",
-        mutates_state=True,
-        implemented=False,
-    ),
-    CommandSpec(
-        name="/artifacts",
-        description="List or inspect run artifacts",
-        arguments="[id]",
-        risk_level="safe",
-        mutates_state=False,
-        implemented=False,
-    ),
-    CommandSpec(
-        name="/approve",
-        description="Approve a pending action",
-        arguments="<id>",
-        risk_level="high",
-        mutates_state=True,
-        implemented=False,
-    ),
-    CommandSpec(
-        name="/doctor",
-        description="Run environment diagnostics",
-        risk_level="low",
-        mutates_state=False,
-        implemented=False,
-    ),
-)
+COMMAND_REGISTRY: tuple[CommandSpec, ...] = build_command_registry(CommandSpec)
 
 
 def _normalize_query(query: str) -> str:
