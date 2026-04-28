@@ -19,6 +19,22 @@ from huggingface_hub import HfApi, SpaceHardware
 
 from agent.core.session import Event
 from agent.tools.sandbox_client import Sandbox
+from agent.tools.sandbox_guardrails import (
+    prepare_sandbox_tool_args,
+    redact_sandbox_text,
+)
+
+
+def _sandbox_secret_values(session: Any | None) -> set[str]:
+    values: set[str] = set()
+    token = getattr(session, "hf_token", None)
+    if token:
+        values.add(token)
+    sandbox = getattr(session, "sandbox", None)
+    sandbox_values = getattr(sandbox, "_secret_values", None)
+    if sandbox_values:
+        values.update(str(value) for value in sandbox_values if value)
+    return values
 
 
 def _looks_like_path(script: str) -> bool:
@@ -103,10 +119,18 @@ async def _ensure_sandbox(
     # Thread-safe log callback: posts tool_log events from the worker thread
     loop = asyncio.get_running_loop()
 
+    secret_values = _sandbox_secret_values(session)
+
     def _log(msg: str) -> None:
         loop.call_soon_threadsafe(
             session.send_event_nowait,
-            Event(event_type="tool_log", data={"tool": "sandbox", "log": msg}),
+            Event(
+                event_type="tool_log",
+                data={
+                    "tool": "sandbox",
+                    "log": redact_sandbox_text(msg, secret_values),
+                },
+            ),
         )
 
     # Bridge asyncio cancel event to a threading.Event for the blocking create call.
@@ -135,6 +159,8 @@ async def _ensure_sandbox(
         sb = await asyncio.to_thread(Sandbox.create, **kwargs)
     except Sandbox.Cancelled:
         return None, "Sandbox creation cancelled by user."
+    except Exception as e:
+        return None, f"Sandbox creation failed: {redact_sandbox_text(e, secret_values)}"
     finally:
         watcher_task.cancel()
     session.sandbox = sb
@@ -154,7 +180,13 @@ async def _ensure_sandbox(
     await session.send_event(
         Event(
             event_type="tool_log",
-            data={"tool": "sandbox", "log": f"Sandbox ready: {sb.space_id} ({sb.url})"},
+            data={
+                "tool": "sandbox",
+                "log": redact_sandbox_text(
+                    f"Sandbox ready: {sb.space_id} ({sb.url})",
+                    secret_values,
+                ),
+            },
         )
     )
 
@@ -221,7 +253,10 @@ async def sandbox_create_handler(
     try:
         sb, error = await _ensure_sandbox(session, hardware=hardware, **create_kwargs)
     except Exception as e:
-        return f"Failed to create sandbox: {e}", False
+        return (
+            f"Failed to create sandbox: {redact_sandbox_text(e, _sandbox_secret_values(session))}",
+            False,
+        )
 
     if error:
         return error, False
@@ -243,20 +278,38 @@ def _make_tool_handler(sandbox_tool_name: str):
             return "No sandbox running. Call sandbox_create first to start one.", False
 
         sb = session.sandbox
+        secret_values = _sandbox_secret_values(session)
+        prepared_args, guard = prepare_sandbox_tool_args(
+            sandbox_tool_name,
+            args,
+            default_root=getattr(sb, "work_dir", "/app"),
+        )
+        if guard is not None:
+            return redact_sandbox_text(f"Policy denied: {guard.reason}", secret_values), False
 
         try:
-            result = await asyncio.to_thread(sb.call_tool, sandbox_tool_name, args)
+            result = await asyncio.to_thread(
+                sb.call_tool,
+                sandbox_tool_name,
+                prepared_args or args,
+            )
             if result.success:
-                output = result.output or "(no output)"
+                output = redact_sandbox_text(result.output or "(no output)", secret_values)
                 return output, True
             else:
-                error_msg = result.error or "Unknown error"
-                output = result.output
+                error_msg = redact_sandbox_text(
+                    result.error or "Unknown error",
+                    secret_values,
+                )
+                output = redact_sandbox_text(result.output, secret_values)
                 if output:
                     return f"{output}\n\nERROR: {error_msg}", False
                 return f"ERROR: {error_msg}", False
         except Exception as e:
-            return f"Sandbox operation failed: {e}", False
+            return (
+                f"Sandbox operation failed: {redact_sandbox_text(e, secret_values)}",
+                False,
+            )
 
     return handler
 

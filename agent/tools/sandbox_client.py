@@ -46,6 +46,12 @@ from typing import Any, Callable
 import httpx
 from huggingface_hub import CommitOperationAdd, HfApi
 
+from agent.tools.sandbox_guardrails import (
+    check_sandbox_path,
+    check_sandbox_work_dir,
+    redact_sandbox_text,
+)
+
 TEMPLATE_SPACE = "burtenshaw/sandbox"
 HARDWARE_OPTIONS = [
     "cpu-basic",
@@ -131,6 +137,59 @@ def _truncate_output(output: str, max_chars: int = 25000, head_ratio: float = 0.
     if spill_path:
         meta += f"Full output saved to {spill_path} — use the read tool with offset/limit to inspect specific sections.\\n"
     return head + meta + tail
+
+_ALLOWED_ROOTS = tuple(pathlib.Path(p).resolve(strict=False) for p in ("/app", "/tmp"))
+_SECRET_KEY_RE = re.compile(
+    r"(?i)(token|authorization|api[_-]?key|secret|password|passwd|private[_-]?key)"
+)
+_HF_TOKEN_RE = re.compile(r"\\bhf_[A-Za-z0-9_\\-]{8,}\\b")
+
+def _secret_values():
+    values = []
+    for key, value in os.environ.items():
+        if value and _SECRET_KEY_RE.search(key):
+            values.append(value)
+    return sorted(set(values), key=len, reverse=True)
+
+def _redact_text(text: str) -> str:
+    redacted = text
+    for secret in _secret_values():
+        redacted = redacted.replace(secret, "[REDACTED]")
+    redacted = re.sub(
+        r"(?i)\\b(HF_TOKEN|GITHUB_TOKEN)\\s*([=:])\\s*(['\\\"]?)([^'\\\"\\s,;)}\\]\\[]+)(\\3)",
+        r"\\1\\2\\3[REDACTED]\\5",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?i)\\b(authorization\\s*:\\s*(?:bearer|basic|token|apikey)\\s+|bearer\\s+)"
+        r"([A-Za-z0-9._\\-:~+/=]{8,})",
+        r"\\1[REDACTED]",
+        redacted,
+    )
+    redacted = _HF_TOKEN_RE.sub("[REDACTED]", redacted)
+    return redacted
+
+def _resolve_sandbox_path(path: str, default_root: str = "/app") -> pathlib.Path:
+    if not path or not str(path).strip():
+        raise ValueError("path is empty")
+    if "\\x00" in str(path):
+        raise ValueError("path contains NUL byte")
+    candidate = pathlib.Path(path)
+    if not candidate.is_absolute():
+        candidate = pathlib.Path(default_root) / candidate
+    return candidate.resolve(strict=False)
+
+def _allowed_path(path: pathlib.Path) -> bool:
+    return any(path == root or root in path.parents for root in _ALLOWED_ROOTS)
+
+def _check_sandbox_path(path: str, operation: str, default_root: str = "/app"):
+    resolved = _resolve_sandbox_path(path, default_root=default_root)
+    if not _allowed_path(resolved):
+        roots = ", ".join(str(root) for root in _ALLOWED_ROOTS)
+        raise PermissionError(
+            f"Sandbox {operation} denied: {resolved} is outside allowed roots ({roots})."
+        )
+    return resolved
 
 def _atomic_write(path: pathlib.Path, content: str):
     """Write atomically: temp file + fsync + os.replace."""
@@ -347,15 +406,16 @@ def health():
 @app.post("/api/bash")
 def bash(req: BashReq):
     try:
+        work_dir = _check_sandbox_path(req.work_dir, "execute from")
         proc = subprocess.Popen(
             req.command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, cwd=req.work_dir, start_new_session=True,
+            text=True, cwd=str(work_dir), start_new_session=True,
         )
         with _proc_lock:
             _active_procs[proc.pid] = proc
         try:
             stdout, stderr = proc.communicate(timeout=req.timeout)
-            output = _strip_ansi(stdout + stderr)
+            output = _redact_text(_strip_ansi(stdout + stderr))
             output = _truncate_output(output)
             return {"success": proc.returncode == 0, "output": output, "error": "" if proc.returncode == 0 else f"Exit code {proc.returncode}"}
         except subprocess.TimeoutExpired:
@@ -369,7 +429,7 @@ def bash(req: BashReq):
             with _proc_lock:
                 _active_procs.pop(proc.pid, None)
     except Exception as e:
-        return {"success": False, "output": "", "error": str(e)}
+        return {"success": False, "output": "", "error": _redact_text(str(e))}
 
 @app.post("/api/kill")
 def kill_all():
@@ -392,7 +452,7 @@ def kill_all():
 @app.post("/api/read")
 def read(req: ReadReq):
     try:
-        p = pathlib.Path(req.path)
+        p = _check_sandbox_path(req.path, "read")
         if not p.exists():
             return {"success": False, "output": "", "error": f"File not found: {req.path}"}
         if p.is_dir():
@@ -402,28 +462,29 @@ def read(req: ReadReq):
         end = start + (req.limit or len(lines))
         selected = lines[start:end]
         numbered = "\\n".join(f"{start + i + 1}\\t{line}" for i, line in enumerate(selected))
+        numbered = _redact_text(numbered)
         return {"success": True, "output": numbered, "error": ""}
     except Exception as e:
-        return {"success": False, "output": "", "error": str(e)}
+        return {"success": False, "output": "", "error": _redact_text(str(e))}
 
 @app.post("/api/write")
 def write(req: WriteReq):
     try:
-        p = pathlib.Path(req.path)
+        p = _check_sandbox_path(req.path, "write")
         _atomic_write(p, req.content)
         msg = f"Wrote {len(req.content)} bytes to {req.path}"
         if p.suffix == ".py":
             warnings = _validate_python(req.content, req.path)
             if warnings:
                 msg += "\\n\\nValidation warnings:\\n" + "\\n".join(f"  ! {w}" for w in warnings)
-        return {"success": True, "output": msg, "error": ""}
+        return {"success": True, "output": _redact_text(msg), "error": ""}
     except Exception as e:
-        return {"success": False, "output": "", "error": str(e)}
+        return {"success": False, "output": "", "error": _redact_text(str(e))}
 
 @app.post("/api/edit")
 def edit(req: EditReq):
     try:
-        p = pathlib.Path(req.path)
+        p = _check_sandbox_path(req.path, "edit")
         if not p.exists():
             return {"success": False, "output": "", "error": f"File not found: {req.path}"}
         content = p.read_text()
@@ -443,13 +504,17 @@ def edit(req: EditReq):
             warnings = _validate_python(new_content, req.path)
             if warnings:
                 msg += "\\n\\nValidation warnings:\\n" + "\\n".join(f"  ! {w}" for w in warnings)
-        return {"success": True, "output": msg, "error": ""}
+        return {"success": True, "output": _redact_text(msg), "error": ""}
     except Exception as e:
-        return {"success": False, "output": "", "error": str(e)}
+        return {"success": False, "output": "", "error": _redact_text(str(e))}
 
 @app.post("/api/exists")
 def exists(req: ExistsReq):
-    return {"success": True, "output": str(pathlib.Path(req.path).exists()).lower(), "error": ""}
+    try:
+        p = _check_sandbox_path(req.path, "read")
+        return {"success": True, "output": str(p.exists()).lower(), "error": ""}
+    except Exception as e:
+        return {"success": False, "output": "", "error": _redact_text(str(e))}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=7860)
@@ -481,7 +546,7 @@ class Sandbox:
     """
 
     space_id: str
-    token: str | None = None
+    token: str | None = field(default=None, repr=False)
     work_dir: str = "/app"
     timeout: int = DEFAULT_TIMEOUT
     _owns_space: bool = field(default=False, repr=False)
@@ -489,8 +554,10 @@ class Sandbox:
     _client: httpx.Client = field(init=False, repr=False)
     _hf_api: HfApi = field(init=False, repr=False)
     _files_read: set = field(init=False, repr=False, default_factory=set)
+    _secret_values: set[str] = field(init=False, repr=False, default_factory=set)
 
     def __post_init__(self):
+        self._remember_secrets(self.token)
         slug = self.space_id.replace("/", "-")
         # Trailing slash is critical: httpx resolves relative paths against base_url.
         # Without it, client.get("health") resolves to /health instead of /api/health.
@@ -502,6 +569,21 @@ class Sandbox:
             follow_redirects=True,
         )
         self._hf_api = HfApi(token=self.token)
+
+    def _remember_secrets(self, *values: str | None) -> None:
+        for value in values:
+            if value:
+                self._secret_values.add(value)
+
+    def _redact_text(self, value: Any) -> str:
+        return redact_sandbox_text(value, self._secret_values)
+
+    def _redacted_result(self, result: ToolResult) -> ToolResult:
+        return ToolResult(
+            success=result.success,
+            output=self._redact_text(result.output),
+            error=self._redact_text(result.error),
+        )
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -547,7 +629,12 @@ class Sandbox:
         Returns:
             A Sandbox instance connected to the running Space.
         """
-        _log = log or print
+        raw_log = log or print
+        secret_values = {value for value in (token, *(secrets or {}).values()) if value}
+
+        def _log(message: object) -> None:
+            raw_log(redact_sandbox_text(message, secret_values))
+
         api = HfApi(token=token)
 
         def _check_cancel():
@@ -618,6 +705,7 @@ class Sandbox:
 
         # Wait for the API server to be responsive (non-fatal)
         sb = cls(space_id=space_id, token=token, _owns_space=True)
+        sb._remember_secrets(*secret_values)
         try:
             sb._wait_for_api(timeout=API_WAIT_TIMEOUT, log=_log)
         except TimeoutError as e:
@@ -743,7 +831,7 @@ class Sandbox:
                     data = resp.json()
                 except (ValueError, UnicodeDecodeError):
                     # Non-JSON response — sandbox is likely still starting up.
-                    body_preview = resp.text[:200] if resp.text else "(empty)"
+                    body_preview = self._redact_text(resp.text[:200] if resp.text else "(empty)")
                     last_error = (
                         f"Sandbox returned non-JSON response (HTTP {resp.status_code}): "
                         f"{body_preview}"
@@ -751,21 +839,21 @@ class Sandbox:
                     if attempt < 2:
                         time.sleep(3 * (attempt + 1))
                         continue
-                    return ToolResult(success=False, error=last_error)
+                    return ToolResult(success=False, error=self._redact_text(last_error))
 
                 if resp.status_code == 200:
                     return ToolResult(
                         success=data.get("success", True),
-                        output=data.get("output", ""),
-                        error=data.get("error", ""),
+                        output=self._redact_text(data.get("output", "")),
+                        error=self._redact_text(data.get("error", "")),
                     )
                 return ToolResult(
                     success=False,
-                    error=data.get("error", f"HTTP {resp.status_code}"),
+                    error=self._redact_text(data.get("error", f"HTTP {resp.status_code}")),
                 )
             except httpx.TimeoutException:
                 return ToolResult(
-                    success=False, error=f"Timeout after {effective_timeout}s"
+                    success=False, error=self._redact_text(f"Timeout after {effective_timeout}s")
                 )
             except httpx.ConnectError:
                 last_error = (
@@ -775,11 +863,11 @@ class Sandbox:
                 if attempt < 2:
                     time.sleep(3 * (attempt + 1))
                     continue
-                return ToolResult(success=False, error=last_error)
+                return ToolResult(success=False, error=self._redact_text(last_error))
             except Exception as e:
-                return ToolResult(success=False, error=str(e))
+                return ToolResult(success=False, error=self._redact_text(e))
 
-        return ToolResult(success=False, error=last_error or "Unknown error")
+        return ToolResult(success=False, error=self._redact_text(last_error or "Unknown error"))
 
     # ── Tools ─────────────────────────────────────────────────────
 
@@ -791,32 +879,47 @@ class Sandbox:
         timeout: int | None = None,
         description: str | None = None,
     ) -> ToolResult:
-        return self._call(
+        work_dir_guard = check_sandbox_work_dir(
+            work_dir or self.work_dir,
+            default_root=self.work_dir,
+        )
+        if not work_dir_guard.allowed:
+            return ToolResult(success=False, error=self._redact_text(work_dir_guard.reason))
+
+        return self._redacted_result(self._call(
             "bash",
             {
                 "command": command,
-                "work_dir": work_dir or self.work_dir,
+                "work_dir": work_dir_guard.path,
                 "timeout": min(timeout or self.timeout, MAX_TIMEOUT),
             },
             timeout=timeout,
-        )
+        ))
 
     def read(
         self, path: str, *, offset: int | None = None, limit: int | None = None
     ) -> ToolResult:
+        path_guard = check_sandbox_path(path, operation="read", default_root=self.work_dir)
+        if not path_guard.allowed:
+            return ToolResult(success=False, error=self._redact_text(path_guard.reason))
+        path = path_guard.path or path
         self._files_read.add(path)
-        return self._call(
+        return self._redacted_result(self._call(
             "read",
             {
                 "path": path,
                 "offset": offset,
                 "limit": limit or (DEFAULT_READ_LIMIT if offset is None else None),
             },
-        )
+        ))
 
     def write(self, path: str, content: str) -> ToolResult:
+        path_guard = check_sandbox_path(path, operation="write", default_root=self.work_dir)
+        if not path_guard.allowed:
+            return ToolResult(success=False, error=self._redact_text(path_guard.reason))
+        path = path_guard.path or path
         if path not in self._files_read:
-            check = self._call("exists", {"path": path})
+            check = self._redacted_result(self._call("exists", {"path": path}))
             if check.success and check.output == "true":
                 return ToolResult(
                     success=False,
@@ -825,7 +928,7 @@ class Sandbox:
                         f"Read it first, or use sandbox_edit for targeted changes."
                     ),
                 )
-        result = self._call("write", {"path": path, "content": content})
+        result = self._redacted_result(self._call("write", {"path": path, "content": content}))
         if result.success:
             self._files_read.add(path)
         return result
@@ -834,6 +937,10 @@ class Sandbox:
         self, path: str, old_str: str, new_str: str, *, replace_all: bool = False,
         mode: str = "replace",
     ) -> ToolResult:
+        path_guard = check_sandbox_path(path, operation="edit", default_root=self.work_dir)
+        if not path_guard.allowed:
+            return ToolResult(success=False, error=self._redact_text(path_guard.reason))
+        path = path_guard.path or path
         if old_str == new_str:
             return ToolResult(success=False, error="old_str and new_str are identical.")
         if path not in self._files_read:
@@ -841,7 +948,7 @@ class Sandbox:
                 success=False,
                 error=f"File {path} has not been read this session. Read it first.",
             )
-        return self._call(
+        return self._redacted_result(self._call(
             "edit",
             {
                 "path": path,
@@ -850,11 +957,11 @@ class Sandbox:
                 "replace_all": replace_all,
                 "mode": mode,
             },
-        )
+        ))
 
     def kill_all(self) -> ToolResult:
         """Kill all active bash processes on the sandbox. Used on cancellation."""
-        return self._call("kill", {})
+        return self._redacted_result(self._call("kill", {}))
 
     # ── Tool schemas & dispatch ───────────────────────────────────
 
