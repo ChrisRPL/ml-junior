@@ -15,6 +15,7 @@ import session_manager as session_module
 from agent.core.events import AgentEvent
 from agent.core.session import Event
 from backend.event_store import SQLiteEventStore
+from backend.session_store import SESSION_ACTIVE, SESSION_CLOSED, SQLiteSessionStore
 import routes.agent as agent_routes
 from routes.agent import _sse_response
 
@@ -241,7 +242,8 @@ def _decode_sse_chunk(chunk: str | bytes) -> dict[str, Any]:
 @pytest.fixture
 def manager(test_config, tmp_path) -> session_module.SessionManager:
     mgr = session_module.SessionManager(
-        event_store=SQLiteEventStore(tmp_path / "events.sqlite")
+        event_store=SQLiteEventStore(tmp_path / "events.sqlite"),
+        session_store=SQLiteSessionStore(tmp_path / "sessions.sqlite"),
     )
     mgr.config = test_config
     return mgr
@@ -284,11 +286,74 @@ async def test_session_manager_create_list_delete_behavior(
 
         assert await manager.delete_session(first) is True
         assert first not in manager.sessions
+        durable_first = manager.session_store.get(first)
+        assert durable_first is not None
+        assert durable_first.status == SESSION_CLOSED
+        assert manager.list_sessions(user_id="alice") == [
+            {
+                "session_id": first,
+                "created_at": durable_first.created_at.isoformat(),
+                "is_active": False,
+                "is_processing": False,
+                "message_count": 0,
+                "user_id": "alice",
+                "pending_approval": None,
+                "model": "test/alternate",
+            }
+        ]
         assert manager.active_session_count == 1
         assert await manager.delete_session(first) is False
     finally:
         await manager.delete_session(first)
         await manager.delete_session(second)
+
+
+async def test_session_manager_lists_durable_metadata_after_restart(
+    test_config,
+    tmp_path,
+    offline_session_constructors,
+):
+    database_path = tmp_path / "sessions.sqlite"
+    manager = session_module.SessionManager(
+        event_store=SQLiteEventStore(tmp_path / "events.sqlite"),
+        session_store_path=database_path,
+    )
+    manager.config = test_config
+    session_id = await manager.create_session(
+        user_id="alice",
+        hf_token="hf_alice",
+        model="test/alternate",
+    )
+
+    try:
+        await _wait_until(lambda: manager.sessions[session_id].broadcaster is not None)
+        created = manager.session_store.get(session_id)
+        assert created is not None
+        assert created.owner_id == "alice"
+        assert created.model == "test/alternate"
+        assert created.status == SESSION_ACTIVE
+
+        restarted = session_module.SessionManager(session_store_path=database_path)
+        restarted.config = test_config
+        restarted_sessions = restarted.list_sessions(user_id="alice")
+
+        assert restarted.sessions == {}
+        assert restarted_sessions == [
+            {
+                "session_id": session_id,
+                "created_at": created.created_at.isoformat(),
+                "is_active": False,
+                "is_processing": False,
+                "message_count": 0,
+                "user_id": "alice",
+                "pending_approval": None,
+                "model": "test/alternate",
+            }
+        ]
+        assert restarted.verify_session_access(session_id, "alice") is True
+        assert await restarted.submit_user_input(session_id, "not restored") is False
+    finally:
+        await manager.delete_session(session_id)
 
 
 def test_pending_approval_is_included_in_session_info(manager):

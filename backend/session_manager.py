@@ -23,12 +23,19 @@ from backend.operation_store import (
     OperationRecord,
     SQLiteOperationStore,
 )
+from backend.session_store import (
+    SESSION_ACTIVE,
+    SESSION_CLOSED,
+    SQLiteSessionStore,
+    SessionRecord,
+)
 
 # Get project root (parent of backend directory)
 PROJECT_ROOT = Path(__file__).parent.parent
 DEFAULT_CONFIG_PATH = str(PROJECT_ROOT / "configs" / "main_agent_config.json")
 DEFAULT_EVENT_STORE_PATH = PROJECT_ROOT / "session_logs" / "events.sqlite3"
 DEFAULT_OPERATION_STORE_PATH = PROJECT_ROOT / "session_logs" / "operations.sqlite3"
+DEFAULT_SESSION_STORE_PATH = PROJECT_ROOT / "session_logs" / "sessions.sqlite3"
 
 
 # These dataclasses match agent/main.py structure
@@ -166,6 +173,8 @@ class SessionManager:
         event_store_path: str | Path | None = None,
         operation_store: SQLiteOperationStore | None = None,
         operation_store_path: str | Path | None = None,
+        session_store: SQLiteSessionStore | None = None,
+        session_store_path: str | Path | None = None,
     ) -> None:
         self.config = load_config(config_path or DEFAULT_CONFIG_PATH)
         self._event_store = event_store
@@ -179,6 +188,12 @@ class SessionManager:
             operation_store_path
             or os.environ.get("MLJ_OPERATION_STORE_PATH")
             or DEFAULT_OPERATION_STORE_PATH
+        )
+        self._session_store = session_store
+        self._session_store_path = (
+            session_store_path
+            or os.environ.get("MLJ_SESSION_STORE_PATH")
+            or DEFAULT_SESSION_STORE_PATH
         )
         self.sessions: dict[str, AgentSession] = {}
         self._lock = asyncio.Lock()
@@ -194,6 +209,12 @@ class SessionManager:
         if self._operation_store is None:
             self._operation_store = SQLiteOperationStore(self._operation_store_path)
         return self._operation_store
+
+    @property
+    def session_store(self) -> SQLiteSessionStore:
+        if self._session_store is None:
+            self._session_store = SQLiteSessionStore(self._session_store_path)
+        return self._session_store
 
     @staticmethod
     def _operation_type(operation: Operation) -> str:
@@ -239,6 +260,26 @@ class SessionManager:
             self.operation_store.transition_status(operation_id, status, **kwargs)
         except Exception as e:
             logger.warning("Operation record update failed for %s: %s", operation_id, e)
+
+    def _mark_session_closed(self, session_id: str) -> None:
+        try:
+            if self.session_store.get(session_id) is not None:
+                self.session_store.update_status(session_id, SESSION_CLOSED)
+        except Exception as e:
+            logger.warning("Session record update failed for %s: %s", session_id, e)
+
+    @staticmethod
+    def _session_record_info(record: SessionRecord) -> dict[str, Any]:
+        return {
+            "session_id": record.id,
+            "created_at": record.created_at.isoformat(),
+            "is_active": False,
+            "is_processing": False,
+            "message_count": 0,
+            "user_id": record.owner_id,
+            "pending_approval": None,
+            "model": record.model,
+        }
 
     def _count_user_sessions(self, user_id: str) -> int:
         """Count active sessions owned by a specific user."""
@@ -322,6 +363,13 @@ class SessionManager:
 
         tool_router, session = await asyncio.to_thread(_create_session_sync)
         session.session_id = session_id
+        resolved_model = session.config.model_name
+        self.session_store.create(
+            session_id=session_id,
+            owner_id=user_id,
+            model=resolved_model,
+            status=SESSION_ACTIVE,
+        )
 
         # Create wrapper
         agent_session = AgentSession(
@@ -504,6 +552,7 @@ class SessionManager:
                 if session_id in self.sessions:
                     self.sessions[session_id].is_active = False
 
+            self._mark_session_closed(session_id)
             logger.info(f"Session {session_id} ended")
 
     async def submit(self, session_id: str, operation: Operation) -> bool:
@@ -630,6 +679,9 @@ class SessionManager:
                         await asyncio.wait_for(agent_session.task, timeout=5.0)
                     except asyncio.TimeoutError:
                         agent_session.task.cancel()
+                        self._mark_session_closed(session_id)
+                elif agent_session is not None:
+                    self._mark_session_closed(session_id)
 
         return success
 
@@ -639,10 +691,15 @@ class SessionManager:
             agent_session = self.sessions.pop(session_id, None)
 
         if not agent_session:
-            return False
+            record = self.session_store.get(session_id)
+            if record is None or record.status == SESSION_CLOSED:
+                return False
+            self._mark_session_closed(session_id)
+            return True
 
         # Clean up sandbox Space before cancelling the task
         await self._cleanup_sandbox(agent_session.session)
+        agent_session.is_active = False
 
         # Cancel the task if running
         if agent_session.task and not agent_session.task.done():
@@ -652,14 +709,18 @@ class SessionManager:
             except asyncio.CancelledError:
                 pass
 
+        self._mark_session_closed(session_id)
         return True
 
     def get_session_owner(self, session_id: str) -> str | None:
         """Get the user_id that owns a session, or None if session doesn't exist."""
         agent_session = self.sessions.get(session_id)
-        if not agent_session:
+        if agent_session:
+            return agent_session.user_id
+        record = self.session_store.get(session_id)
+        if record is None:
             return None
-        return agent_session.user_id
+        return record.owner_id
 
     def verify_session_access(self, session_id: str, user_id: str) -> bool:
         """Check if a user has access to a session.
@@ -679,7 +740,10 @@ class SessionManager:
         """Get information about a session."""
         agent_session = self.sessions.get(session_id)
         if not agent_session:
-            return None
+            record = self.session_store.get(session_id)
+            if record is None:
+                return None
+            return self._session_record_info(record)
 
         # Extract pending approval tools if any
         pending_approval = None
@@ -719,8 +783,19 @@ class SessionManager:
             user_id: If provided, only return sessions owned by this user.
                      If "dev", return all sessions (dev mode).
         """
-        results = []
+        results: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        owner_filter = None if user_id == "dev" else user_id
+        for record in self.session_store.list(owner_id=owner_filter):
+            info = self.get_session_info(record.id)
+            if info is None:
+                continue
+            results.append(info)
+            seen.add(record.id)
+
         for sid in self.sessions:
+            if sid in seen:
+                continue
             info = self.get_session_info(sid)
             if not info:
                 continue
