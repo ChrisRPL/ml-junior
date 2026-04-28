@@ -572,16 +572,107 @@ async def chat_sse(
 # ---------------------------------------------------------------------------
 # Shared SSE helpers
 # ---------------------------------------------------------------------------
-_TERMINAL_EVENTS = {"turn_complete", "approval_required", "error", "interrupted", "shutdown"}
+_TERMINAL_EVENTS = {
+    "turn_complete",
+    "approval_required",
+    "error",
+    "interrupted",
+    "shutdown",
+}
 _SSE_KEEPALIVE_SECONDS = 15
+_EVENT_CURSOR_QUERY_KEYS = ("after_sequence", "after")
 
 
-def _sse_response(broadcaster, event_queue, sub_id) -> StreamingResponse:
+def _parse_event_cursor(request: Request) -> int | None:
+    """Return an explicit replay cursor, or None for legacy live-only attach."""
+    raw_cursor: str | None = None
+    cursor_source = ""
+    for key in _EVENT_CURSOR_QUERY_KEYS:
+        value = request.query_params.get(key)
+        if value not in (None, ""):
+            raw_cursor = value
+            cursor_source = key
+            break
+
+    if raw_cursor is None:
+        value = request.headers.get("Last-Event-ID") or request.headers.get(
+            "last-event-id"
+        )
+        if value not in (None, ""):
+            raw_cursor = value
+            cursor_source = "Last-Event-ID"
+
+    if raw_cursor is None:
+        return None
+
+    try:
+        cursor = int(raw_cursor)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid event cursor {cursor_source!r}: expected an integer",
+        )
+    if cursor < 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid event cursor {cursor_source!r}: expected >= 0",
+        )
+    return cursor
+
+
+def _event_sequence(event: Any) -> int | None:
+    sequence = getattr(event, "sequence", None)
+    if sequence is None and isinstance(event, dict):
+        sequence = event.get("sequence")
+    if sequence is None:
+        return None
+    try:
+        parsed = int(sequence)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 1:
+        return None
+    return parsed
+
+
+def _sse_chunk(event: Any) -> tuple[str, str, int | None]:
+    legacy_msg = event_to_legacy_dict(event)
+    sequence = _event_sequence(event)
+    fields = []
+    if sequence is not None:
+        fields.append(f"id: {sequence}")
+    fields.append(f"data: {json.dumps(legacy_msg)}")
+    return (
+        "\n".join(fields) + "\n\n",
+        legacy_msg.get("event_type", ""),
+        sequence,
+    )
+
+
+def _sse_response(
+    broadcaster,
+    event_queue,
+    sub_id,
+    *,
+    replay_events: list[Any] | None = None,
+    after_sequence: int = 0,
+) -> StreamingResponse:
     """Build a StreamingResponse that drains *event_queue* as SSE,
     sending keepalive comments every 15 s to prevent proxy timeouts."""
 
     async def event_generator():
+        last_sequence = after_sequence
         try:
+            for replay_event in replay_events or []:
+                chunk, event_type, sequence = _sse_chunk(replay_event)
+                if sequence is not None and sequence <= last_sequence:
+                    continue
+                yield chunk
+                if sequence is not None:
+                    last_sequence = max(last_sequence, sequence)
+                if event_type in _TERMINAL_EVENTS:
+                    return
+
             while True:
                 try:
                     msg = await asyncio.wait_for(
@@ -591,9 +682,12 @@ def _sse_response(broadcaster, event_queue, sub_id) -> StreamingResponse:
                     # SSE comment — ignored by parsers, keeps connection alive
                     yield ": keepalive\n\n"
                     continue
-                legacy_msg = event_to_legacy_dict(msg)
-                event_type = legacy_msg.get("event_type", "")
-                yield f"data: {json.dumps(legacy_msg)}\n\n"
+                chunk, event_type, sequence = _sse_chunk(msg)
+                if sequence is not None and sequence <= last_sequence:
+                    continue
+                yield chunk
+                if sequence is not None:
+                    last_sequence = max(last_sequence, sequence)
                 if event_type in _TERMINAL_EVENTS:
                     break
         finally:
@@ -613,6 +707,7 @@ def _sse_response(broadcaster, event_queue, sub_id) -> StreamingResponse:
 @router.get("/events/{session_id}")
 async def subscribe_events(
     session_id: str,
+    request: Request,
     user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
     """Subscribe to events for a running session without submitting new input.
@@ -626,9 +721,26 @@ async def subscribe_events(
     if not agent_session or not agent_session.is_active:
         raise HTTPException(status_code=404, detail="Session not found or inactive")
 
+    after_sequence = _parse_event_cursor(request)
     broadcaster = agent_session.broadcaster
     sub_id, event_queue = broadcaster.subscribe()
-    return _sse_response(broadcaster, event_queue, sub_id)
+    replay_events = None
+    if after_sequence is not None:
+        try:
+            replay_events = session_manager.replay_events(
+                session_id,
+                after_sequence=after_sequence,
+            )
+        except Exception:
+            broadcaster.unsubscribe(sub_id)
+            raise
+    return _sse_response(
+        broadcaster,
+        event_queue,
+        sub_id,
+        replay_events=replay_events,
+        after_sequence=after_sequence or 0,
+    )
 
 
 @router.post("/interrupt/{session_id}")

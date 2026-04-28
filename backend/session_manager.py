@@ -96,7 +96,11 @@ class EventBroadcaster:
                 event = await self._source.get()
                 if self._event_store is not None and isinstance(event, AgentEvent):
                     event = self._event_store.append(event)
-                msg = event_to_legacy_dict(event)
+                msg = (
+                    event
+                    if isinstance(event, AgentEvent)
+                    else event_to_legacy_dict(event)
+                )
                 for q in self._subscribers.values():
                     await q.put(msg)
             except asyncio.CancelledError:
@@ -439,6 +443,15 @@ class SessionManager:
             op_type=OpType.EXEC_APPROVAL, data={"approvals": approvals}
         )
         return await self.submit(session_id, operation)
+
+    def replay_events(
+        self,
+        session_id: str,
+        *,
+        after_sequence: int = 0,
+    ) -> list[AgentEvent]:
+        """Replay persisted session events after the given sequence cursor."""
+        return self.event_store.replay(session_id, after_sequence=after_sequence)
 
     async def interrupt(self, session_id: str) -> bool:
         """Interrupt a session by signalling cancellation directly (bypasses queue)."""

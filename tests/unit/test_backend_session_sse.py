@@ -128,8 +128,16 @@ class FakeSseAgentEvent(FakeAgentEvent):
 
 
 class FakeRequest:
-    def __init__(self, body: dict[str, Any]):
+    def __init__(
+        self,
+        body: dict[str, Any],
+        *,
+        headers: dict[str, str] | None = None,
+        query_params: dict[str, str] | None = None,
+    ):
         self._body = body
+        self.headers = headers or {}
+        self.query_params = query_params or {}
 
     async def json(self) -> dict[str, Any]:
         return self._body
@@ -184,9 +192,50 @@ class RouteSessionManager:
         return True
 
 
-def _decode_sse_chunk(chunk: str | bytes) -> dict[str, Any]:
+class ReplayRouteSessionManager:
+    def __init__(
+        self,
+        broadcaster: RouteBroadcaster,
+        events: list[AgentEvent],
+    ) -> None:
+        self.sessions = {
+            "session-a": SimpleNamespace(
+                is_active=True,
+                broadcaster=broadcaster,
+            )
+        }
+        self._events = events
+        self.replay_calls: list[tuple[str, int]] = []
+
+    def replay_events(
+        self,
+        session_id: str,
+        *,
+        after_sequence: int = 0,
+    ) -> list[AgentEvent]:
+        self.replay_calls.append((session_id, after_sequence))
+        return [
+            event
+            for event in self._events
+            if event.session_id == session_id and event.sequence > after_sequence
+        ]
+
+
+def _decode_sse_event(chunk: str | bytes) -> dict[str, Any]:
     text = chunk.decode() if isinstance(chunk, bytes) else chunk
-    return json.loads(text.removeprefix("data: ").strip())
+    event_id = None
+    data_lines = []
+    for line in text.strip().splitlines():
+        if line.startswith("id: "):
+            event_id = line.removeprefix("id: ")
+        if line.startswith("data: "):
+            data_lines.append(line.removeprefix("data: "))
+    assert data_lines
+    return {"id": event_id, "data": json.loads("\n".join(data_lines))}
+
+
+def _decode_sse_chunk(chunk: str | bytes) -> dict[str, Any]:
+    return _decode_sse_event(chunk)["data"]
 
 
 @pytest.fixture
@@ -380,6 +429,94 @@ async def test_sse_response_supports_to_legacy_sse_envelope_method():
     assert broadcaster.unsubscribed == [7]
 
 
+async def test_sse_response_emits_sequence_id_for_enveloped_events():
+    class TrackingBroadcaster:
+        def __init__(self):
+            self.unsubscribed: list[int] = []
+
+        def unsubscribe(self, sub_id: int) -> None:
+            self.unsubscribed.append(sub_id)
+
+    broadcaster = TrackingBroadcaster()
+    event_queue = asyncio.Queue()
+    await event_queue.put(
+        AgentEvent(
+            session_id="session-a",
+            sequence=4,
+            event_type="turn_complete",
+            data={"history_size": 2},
+        )
+    )
+
+    response = _sse_response(broadcaster, event_queue, sub_id=7)
+    chunks = [_decode_sse_event(chunk) async for chunk in response.body_iterator]
+
+    assert chunks == [
+        {
+            "id": "4",
+            "data": {
+                "event_type": "turn_complete",
+                "data": {"history_size": 2},
+            },
+        }
+    ]
+    assert broadcaster.unsubscribed == [7]
+
+
+async def test_sse_response_deduplicates_live_event_after_replay_boundary():
+    class TrackingBroadcaster:
+        def __init__(self):
+            self.unsubscribed: list[int] = []
+
+        def unsubscribe(self, sub_id: int) -> None:
+            self.unsubscribed.append(sub_id)
+
+    replay_event = AgentEvent(
+        session_id="session-a",
+        sequence=2,
+        event_type="processing",
+        data={"message": "from store"},
+    )
+    duplicate_live_event = replay_event.model_copy()
+    terminal_live_event = AgentEvent(
+        session_id="session-a",
+        sequence=3,
+        event_type="turn_complete",
+        data={"history_size": 2},
+    )
+    broadcaster = TrackingBroadcaster()
+    event_queue = asyncio.Queue()
+    await event_queue.put(duplicate_live_event)
+    await event_queue.put(terminal_live_event)
+
+    response = _sse_response(
+        broadcaster,
+        event_queue,
+        sub_id=7,
+        replay_events=[replay_event],
+        after_sequence=1,
+    )
+    chunks = [_decode_sse_event(chunk) async for chunk in response.body_iterator]
+
+    assert chunks == [
+        {
+            "id": "2",
+            "data": {
+                "event_type": "processing",
+                "data": {"message": "from store"},
+            },
+        },
+        {
+            "id": "3",
+            "data": {
+                "event_type": "turn_complete",
+                "data": {"history_size": 2},
+            },
+        },
+    ]
+    assert broadcaster.unsubscribed == [7]
+
+
 async def test_chat_sse_text_route_subscribes_before_submit_and_closes(
     monkeypatch,
 ):
@@ -497,6 +634,106 @@ async def test_chat_sse_quota_error_unsubscribes_before_raising(monkeypatch):
 
     assert exc_info.value.status_code == 429
     assert fake_manager.user_inputs == []
+    assert broadcaster.unsubscribed == [1]
+
+
+@pytest.mark.parametrize(
+    ("query_params", "headers", "expected_after", "expected_ids"),
+    [
+        ({"after_sequence": "1"}, {}, 1, ["2", "3"]),
+        ({"after": "2"}, {}, 2, ["3"]),
+        ({}, {"Last-Event-ID": "1"}, 1, ["2", "3"]),
+    ],
+)
+async def test_subscribe_events_replays_after_explicit_cursor(
+    monkeypatch,
+    query_params,
+    headers,
+    expected_after,
+    expected_ids,
+):
+    events = [
+        AgentEvent(
+            session_id="session-a",
+            sequence=1,
+            event_type="ready",
+            data={"message": "Agent initialized"},
+        ),
+        AgentEvent(
+            session_id="session-a",
+            sequence=2,
+            event_type="processing",
+            data={"message": "working"},
+        ),
+        AgentEvent(
+            session_id="session-a",
+            sequence=3,
+            event_type="turn_complete",
+            data={"history_size": 2},
+        ),
+    ]
+    broadcaster = RouteBroadcaster()
+    fake_manager = ReplayRouteSessionManager(broadcaster, events)
+
+    monkeypatch.setattr(agent_routes, "session_manager", fake_manager)
+    monkeypatch.setattr(agent_routes, "_check_session_access", lambda *_args: None)
+
+    response = await agent_routes.subscribe_events(
+        "session-a",
+        FakeRequest({}, headers=headers, query_params=query_params),
+        {"user_id": "dev"},
+    )
+    chunks = [_decode_sse_event(chunk) async for chunk in response.body_iterator]
+
+    assert fake_manager.replay_calls == [("session-a", expected_after)]
+    assert [chunk["id"] for chunk in chunks] == expected_ids
+    assert [chunk["data"]["event_type"] for chunk in chunks] == [
+        event.event_type
+        for event in events
+        if event.sequence > expected_after
+    ]
+    assert all(set(chunk["data"]) == {"event_type", "data"} for chunk in chunks)
+    assert broadcaster.unsubscribed == [1]
+
+
+async def test_subscribe_events_without_cursor_stays_live_only(monkeypatch):
+    stored_terminal = AgentEvent(
+        session_id="session-a",
+        sequence=2,
+        event_type="turn_complete",
+        data={"history_size": 2},
+    )
+    live_terminal = AgentEvent(
+        session_id="session-a",
+        sequence=3,
+        event_type="turn_complete",
+        data={"history_size": 3},
+    )
+    broadcaster = RouteBroadcaster()
+    fake_manager = ReplayRouteSessionManager(broadcaster, [stored_terminal])
+
+    monkeypatch.setattr(agent_routes, "session_manager", fake_manager)
+    monkeypatch.setattr(agent_routes, "_check_session_access", lambda *_args: None)
+
+    response = await agent_routes.subscribe_events(
+        "session-a",
+        FakeRequest({}),
+        {"user_id": "dev"},
+    )
+    await broadcaster.queues[1].put(live_terminal)
+
+    chunks = [_decode_sse_event(chunk) async for chunk in response.body_iterator]
+
+    assert fake_manager.replay_calls == []
+    assert chunks == [
+        {
+            "id": "3",
+            "data": {
+                "event_type": "turn_complete",
+                "data": {"history_size": 3},
+            },
+        }
+    ]
     assert broadcaster.unsubscribed == [1]
 
 
@@ -634,7 +871,10 @@ async def test_event_broadcaster_persists_without_subscribers_and_terminal_event
             )
         )
 
-        assert await _queue_get(subscriber) == {
+        broadcasted = await _queue_get(subscriber)
+        assert isinstance(broadcasted, AgentEvent)
+        assert broadcasted.sequence == 2
+        assert session_module.event_to_legacy_dict(broadcasted) == {
             "event_type": "turn_complete",
             "data": {"history_size": 3},
         }
