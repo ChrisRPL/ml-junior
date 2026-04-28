@@ -29,6 +29,8 @@ export type EventRedactionStatus =
 
 export interface AgentEventMetadata {
   id?: string;
+  sse_id?: string;
+  cursor?: string;
   session_id?: string;
   sequence?: number;
   timestamp?: string;

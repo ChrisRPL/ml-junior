@@ -13,6 +13,8 @@ import { type UIMessage, lastAssistantMessageIsCompleteWithApprovalResponses } f
 import { SSEChatTransport, type SideChannelCallbacks } from '@/lib/sse-chat-transport';
 import { loadMessages, saveMessages } from '@/lib/chat-message-store';
 import { saveBackendMessages } from '@/lib/backend-message-store';
+import { buildEventStreamPath } from '@/lib/sse-event-cursors';
+import { createEventCursorFilterStream, createSSEParserStream } from '@/lib/sse-event-stream';
 import { saveResearch, loadResearch, clearResearch, RESEARCH_MAX_STEPS } from '@/lib/research-store';
 import { llmMessagesToUIMessages } from '@/lib/convert-llm-messages';
 import { apiFetch } from '@/utils/api';
@@ -20,6 +22,7 @@ import { useAgentStore } from '@/store/agentStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useLayoutStore } from '@/store/layoutStore';
 import { logger } from '@/utils/logger';
+import type { AgentEvent } from '@/types/events';
 
 interface UseAgentChatOptions {
   sessionId: string;
@@ -301,8 +304,11 @@ export function useAgentChat({ sessionId, isActive, onReady, onError, onSessionD
 
   // -- Create transport (one per session, stable for lifetime) ------------
   const transportRef = useRef<SSEChatTransport | null>(null);
-  if (!transportRef.current) {
+  const transportSessionIdRef = useRef<string | null>(null);
+  if (!transportRef.current || transportSessionIdRef.current !== sessionId) {
+    transportRef.current?.destroy();
     transportRef.current = new SSEChatTransport(sessionId, sideChannel);
+    transportSessionIdRef.current = sessionId;
   }
 
   // Keep side-channel callbacks in sync
@@ -315,6 +321,7 @@ export function useAgentChat({ sessionId, isActive, onReady, onError, onSessionD
     return () => {
       transportRef.current?.destroy();
       transportRef.current = null;
+      transportSessionIdRef.current = null;
     };
   }, []);
 
@@ -501,74 +508,69 @@ export function useAgentChat({ sessionId, isActive, onReady, onError, onSessionD
     /** Read the event stream from GET /api/events and forward to side-channel. */
     const consumeEventStream = async (signal: AbortSignal) => {
       try {
-        const res = await apiFetch(`/api/events/${sessionId}`, {
+        const res = await apiFetch(buildEventStreamPath(sessionId), {
           headers: { 'Accept': 'text/event-stream' },
           signal,
         });
         if (!res.ok || !res.body) return;
 
-        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buf = '';
+        const reader = res.body
+          .pipeThrough(new TextDecoderStream())
+          .pipeThrough(createSSEParserStream())
+          .pipeThrough(createEventCursorFilterStream(sessionId))
+          .getReader();
+
         while (true) {
-          const { value, done } = await reader.read();
+          const { value: event, done } = await reader.read();
           if (done || signal.aborted) break;
-          buf += value;
-          const lines = buf.split('\n');
-          buf = lines.pop() || '';
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data: ')) continue;
-            try {
-              const event = JSON.parse(trimmed.slice(6));
-              // Forward to side-channel for real-time UI updates
-              const et = event.event_type as string;
-              if (et === 'processing') sideChannel.onProcessing();
-              else if (et === 'assistant_chunk') sideChannel.onStreaming();
-              else if (et === 'tool_call') {
-                const t = event.data?.tool as string;
-                const d = event.data?.arguments?.description as string | undefined;
-                sideChannel.onToolRunning(t, d);
-                sideChannel.onToolCallPanel(t, (event.data?.arguments || {}) as Record<string, unknown>);
-              } else if (et === 'tool_output') {
-                sideChannel.onToolOutputPanel(
-                  event.data?.tool as string,
-                  event.data?.tool_call_id as string,
-                  event.data?.output as string,
-                  event.data?.success as boolean,
-                );
-              } else if (et === 'tool_state_change') {
-                const state = event.data?.state as string;
-                const toolName = event.data?.tool as string;
-                if (state === 'running' && toolName) sideChannel.onToolRunning(toolName);
-              } else if (et === 'turn_complete' || et === 'error' || et === 'interrupted') {
-                sideChannel.onProcessingDone();
-                stopReconnect();
-                // Final hydration to get the complete message state
-                const result = await hydrateMessages();
-                if (result) {
-                  const uiMsgs = llmMessagesToUIMessages(result.data, result.pendingIds, chatActionsRef.current.messages);
-                  if (uiMsgs.length > 0) {
-                    chat.setMessages(uiMsgs);
-                    saveMessages(sessionId, uiMsgs);
-                  }
-                }
-                return;
-              } else if (et === 'approval_required') {
-                sideChannel.onApprovalRequired(
-                  (event.data?.tools || []) as Array<{ tool: string; arguments: Record<string, unknown>; tool_call_id: string }>,
-                );
-                stopReconnect();
-                const result = await hydrateMessages();
-                if (result) {
-                  const uiMsgs = llmMessagesToUIMessages(result.data, result.pendingIds, chatActionsRef.current.messages);
-                  if (uiMsgs.length > 0) {
-                    chat.setMessages(uiMsgs);
-                    saveMessages(sessionId, uiMsgs);
-                  }
-                }
-                return;
+
+          const et = event.event_type as AgentEvent['event_type'];
+          if (et === 'processing') sideChannel.onProcessing();
+          else if (et === 'assistant_chunk') sideChannel.onStreaming();
+          else if (et === 'tool_call') {
+            const args = (event.data?.arguments || {}) as Record<string, unknown>;
+            const t = event.data?.tool as string;
+            const d = args.description as string | undefined;
+            sideChannel.onToolRunning(t, d);
+            sideChannel.onToolCallPanel(t, args);
+          } else if (et === 'tool_output') {
+            sideChannel.onToolOutputPanel(
+              event.data?.tool as string,
+              event.data?.tool_call_id as string,
+              event.data?.output as string,
+              event.data?.success as boolean,
+            );
+          } else if (et === 'tool_state_change') {
+            const state = event.data?.state as string;
+            const toolName = event.data?.tool as string;
+            if (state === 'running' && toolName) sideChannel.onToolRunning(toolName);
+          } else if (et === 'turn_complete' || et === 'error' || et === 'interrupted') {
+            sideChannel.onProcessingDone();
+            stopReconnect();
+            // Final hydration to get the complete message state
+            const result = await hydrateMessages();
+            if (result) {
+              const uiMsgs = llmMessagesToUIMessages(result.data, result.pendingIds, chatActionsRef.current.messages);
+              if (uiMsgs.length > 0) {
+                chat.setMessages(uiMsgs);
+                saveMessages(sessionId, uiMsgs);
               }
-            } catch { /* ignore parse errors */ }
+            }
+            return;
+          } else if (et === 'approval_required') {
+            sideChannel.onApprovalRequired(
+              (event.data?.tools || []) as Array<{ tool: string; arguments: Record<string, unknown>; tool_call_id: string }>,
+            );
+            stopReconnect();
+            const result = await hydrateMessages();
+            if (result) {
+              const uiMsgs = llmMessagesToUIMessages(result.data, result.pendingIds, chatActionsRef.current.messages);
+              if (uiMsgs.length > 0) {
+                chat.setMessages(uiMsgs);
+                saveMessages(sessionId, uiMsgs);
+              }
+            }
+            return;
           }
         }
       } catch {

@@ -10,6 +10,8 @@ import { apiFetch } from '@/utils/api';
 import { logger } from '@/utils/logger';
 import type { AgentEvent } from '@/types/events';
 import { useAgentStore } from '@/store/agentStore';
+import { buildEventStreamPath } from '@/lib/sse-event-cursors';
+import { createEventCursorFilterStream, createSSEParserStream } from '@/lib/sse-event-stream';
 
 // ---------------------------------------------------------------------------
 // Side-channel callback interface (non-chat events forwarded to the store)
@@ -40,39 +42,6 @@ export interface SideChannelCallbacks {
 let partIdCounter = 0;
 function nextPartId(prefix: string): string {
   return `${prefix}-${Date.now()}-${++partIdCounter}`;
-}
-
-/** Parse an SSE text stream into AgentEvent objects. */
-function createSSEParserStream(): TransformStream<string, AgentEvent> {
-  let buffer = '';
-  return new TransformStream<string, AgentEvent>({
-    transform(chunk, controller) {
-      buffer += chunk;
-      const lines = buffer.split('\n');
-      // Keep the last (possibly incomplete) line in the buffer
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('data: ')) {
-          try {
-            const json = JSON.parse(trimmed.slice(6));
-            controller.enqueue(json as AgentEvent);
-          } catch {
-            logger.warn('SSE parse error:', trimmed);
-          }
-        }
-      }
-    },
-    flush(controller) {
-      // Process any remaining data in buffer
-      if (buffer.trim().startsWith('data: ')) {
-        try {
-          const json = JSON.parse(buffer.trim().slice(6));
-          controller.enqueue(json as AgentEvent);
-        } catch { /* ignore incomplete */ }
-      }
-    },
-  });
 }
 
 /** Transform AgentEvent objects into UIMessageChunk objects for the Vercel AI SDK. */
@@ -375,6 +344,7 @@ export class SSEChatTransport implements ChatTransport<UIMessage> {
     return response.body
       .pipeThrough(new TextDecoderStream())
       .pipeThrough(createSSEParserStream())
+      .pipeThrough(createEventCursorFilterStream(sessionId))
       .pipeThrough(createEventToChunkStream(this.sideChannel));
   }
 
@@ -389,7 +359,7 @@ export class SSEChatTransport implements ChatTransport<UIMessage> {
       if (!info.is_processing) return null;
 
       // Session is mid-turn — subscribe to its event broadcast.
-      const response = await apiFetch(`/api/events/${this.sessionId}`, {
+      const response = await apiFetch(buildEventStreamPath(this.sessionId), {
         headers: { 'Accept': 'text/event-stream' },
       });
       if (!response.ok || !response.body) return null;
@@ -399,6 +369,7 @@ export class SSEChatTransport implements ChatTransport<UIMessage> {
       return response.body
         .pipeThrough(new TextDecoderStream())
         .pipeThrough(createSSEParserStream())
+        .pipeThrough(createEventCursorFilterStream(this.sessionId))
         .pipeThrough(createEventToChunkStream(this.sideChannel));
     } catch {
       return null;
