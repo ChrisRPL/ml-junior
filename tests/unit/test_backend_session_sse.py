@@ -937,6 +937,82 @@ async def test_subscribe_events_replays_after_explicit_cursor(
     assert broadcaster.unsubscribed == [1]
 
 
+async def test_subscribe_events_replays_persisted_events_before_live_stream(
+    monkeypatch,
+):
+    replayed_event = AgentEvent(
+        session_id="session-a",
+        sequence=2,
+        event_type="processing",
+        data={"message": "persisted"},
+    )
+    live_event = AgentEvent(
+        session_id="session-a",
+        sequence=3,
+        event_type="turn_complete",
+        data={"history_size": 2},
+    )
+    broadcaster = RouteBroadcaster()
+    fake_manager = ReplayRouteSessionManager(broadcaster, [replayed_event])
+
+    monkeypatch.setattr(agent_routes, "session_manager", fake_manager)
+    monkeypatch.setattr(agent_routes, "_check_session_access", lambda *_args: None)
+
+    response = await agent_routes.subscribe_events(
+        "session-a",
+        FakeRequest({}, query_params={"after_sequence": "1"}),
+        {"user_id": "dev"},
+    )
+    await broadcaster.queues[1].put(live_event)
+
+    chunks = [_decode_sse_event(chunk) async for chunk in response.body_iterator]
+
+    assert fake_manager.replay_calls == [("session-a", 1)]
+    assert chunks == [
+        {
+            "id": "2",
+            "data": {
+                "event_type": "processing",
+                "data": {"message": "persisted"},
+            },
+        },
+        {
+            "id": "3",
+            "data": {
+                "event_type": "turn_complete",
+                "data": {"history_size": 2},
+            },
+        },
+    ]
+    assert broadcaster.unsubscribed == [1]
+
+
+@pytest.mark.parametrize(
+    "query_params",
+    [{"after_sequence": "not-int"}, {"after": "-1"}],
+)
+async def test_subscribe_events_rejects_invalid_replay_cursor(
+    monkeypatch,
+    query_params,
+):
+    broadcaster = RouteBroadcaster()
+    fake_manager = ReplayRouteSessionManager(broadcaster, [])
+
+    monkeypatch.setattr(agent_routes, "session_manager", fake_manager)
+    monkeypatch.setattr(agent_routes, "_check_session_access", lambda *_args: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_routes.subscribe_events(
+            "session-a",
+            FakeRequest({}, query_params=query_params),
+            {"user_id": "dev"},
+        )
+
+    assert exc_info.value.status_code == 400
+    assert fake_manager.replay_calls == []
+    assert broadcaster.subscribed is False
+
+
 async def test_subscribe_events_without_cursor_stays_live_only(monkeypatch):
     stored_terminal = AgentEvent(
         session_id="session-a",
