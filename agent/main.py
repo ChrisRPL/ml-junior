@@ -139,9 +139,44 @@ class Submission:
     operation: Operation
 
 
+HEADLESS_APPROVAL_REQUIRED_EXIT_CODE = 2
+
+
 def _create_rich_console():
     """Get the shared rich Console."""
     return get_console()
+
+
+def _print_headless_pending_approvals(tools_data: list[dict[str, Any]]) -> None:
+    """Print approval-required tools in a non-interactive, script-friendly form."""
+    print("ERROR: approval required in headless mode.", file=sys.stderr)
+    print("Pending tools:", file=sys.stderr)
+
+    if not tools_data:
+        print("  - unknown", file=sys.stderr)
+    for tool in tools_data:
+        tool_name = tool.get("tool") or "unknown"
+        tool_call_id = tool.get("tool_call_id") or "unknown"
+        arguments = tool.get("arguments", {})
+        operation = None
+        if isinstance(arguments, dict):
+            operation = (
+                arguments.get("operation")
+                or arguments.get("command")
+                or arguments.get("path")
+            )
+        reason = tool.get("reason")
+        detail = f"  - {tool_name} ({tool_call_id})"
+        if operation:
+            detail += f": {operation}"
+        if reason:
+            detail += f" - {reason}"
+        print(detail, file=sys.stderr)
+
+    print(
+        "Re-run with --yolo or --auto-approve to approve these tools automatically.",
+        file=sys.stderr,
+    )
 
 
 class _ThinkingShimmer:
@@ -1049,7 +1084,8 @@ async def headless_main(
     model: str | None = None,
     max_iterations: int | None = None,
     stream: bool = True,
-) -> None:
+    auto_approve: bool = False,
+) -> int:
     """Run a single prompt headlessly and exit."""
     import logging
 
@@ -1058,13 +1094,13 @@ async def headless_main(
     hf_token = _get_hf_token()
     if not hf_token:
         print("ERROR: No HF token found. Set HF_TOKEN or run `huggingface-cli login`.", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     print(f"HF token loaded", file=sys.stderr)
 
     config_path = Path(__file__).parent.parent / "configs" / "main_agent_config.json"
     config = load_config(config_path)
-    config.yolo_mode = True  # Auto-approve everything in headless mode
+    config.yolo_mode = bool(auto_approve)
 
     if model:
         config.model_name = model
@@ -1125,6 +1161,7 @@ async def headless_main(
     # a static block once each sub-agent finishes, instead of streaming via
     # the live redrawing SubAgentDisplayManager (which is TTY-only).
     _hl_research_buffers: dict[str, dict] = {}
+    exit_code = 0
 
     while True:
         event = await event_queue.get()
@@ -1191,9 +1228,13 @@ async def headless_main(
             else:
                 print_tool_log(tool, log)
         elif event.event_type == "approval_required":
-            # Auto-approve everything in headless mode (safety net if yolo_mode
-            # didn't prevent the approval event for some reason)
             tools_data = event.data.get("tools", []) if event.data else []
+            if not auto_approve:
+                stream_buf.discard()
+                _print_headless_pending_approvals(tools_data)
+                exit_code = HEADLESS_APPROVAL_REQUIRED_EXIT_CODE
+                break
+
             approvals = [
                 {
                     "tool_call_id": t.get("tool_call_id", ""),
@@ -1218,6 +1259,7 @@ async def headless_main(
             stream_buf.discard()
             error = event.data.get("error", "Unknown error") if event.data else "Unknown error"
             print_error(error)
+            exit_code = 1
             break
         elif event.event_type in ("turn_complete", "interrupted"):
             stream_buf.discard()
@@ -1236,6 +1278,8 @@ async def headless_main(
     except asyncio.TimeoutError:
         agent_task.cancel()
         await tool_router.__aexit__(None, None, None)
+
+    return exit_code
 
 
 def cli():
@@ -1256,6 +1300,8 @@ def cli():
                         help="Max LLM requests per turn (default: 50, use -1 for unlimited)")
     parser.add_argument("--no-stream", action="store_true",
                         help="Disable token streaming (use non-streaming LLM calls)")
+    parser.add_argument("--yolo", "--auto-approve", dest="auto_approve", action="store_true",
+                        help="Headless mode: auto-approve approval-gated tools")
     args = parser.parse_args()
 
     try:
@@ -1263,7 +1309,16 @@ def cli():
             max_iter = args.max_iterations
             if max_iter is not None and max_iter < 0:
                 max_iter = 10_000  # effectively unlimited
-            asyncio.run(headless_main(args.prompt, model=args.model, max_iterations=max_iter, stream=not args.no_stream))
+            exit_code = asyncio.run(
+                headless_main(
+                    args.prompt,
+                    model=args.model,
+                    max_iterations=max_iter,
+                    stream=not args.no_stream,
+                    auto_approve=args.auto_approve,
+                )
+            )
+            sys.exit(exit_code)
         else:
             asyncio.run(main())
     except KeyboardInterrupt:
