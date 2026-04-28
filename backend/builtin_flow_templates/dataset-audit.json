@@ -1,0 +1,195 @@
+{
+  "id": "dataset-audit",
+  "name": "Dataset Audit",
+  "version": "v1",
+  "description": "Audit dataset lineage, schema, splits, label quality, leakage, privacy, and card readiness.",
+  "inputs": [
+    {
+      "id": "dataset",
+      "type": "string",
+      "required": true,
+      "description": "Dataset identifier, local path, or data source."
+    },
+    {
+      "id": "task",
+      "type": "string",
+      "required": false,
+      "description": "Expected task or modality for the dataset."
+    },
+    {
+      "id": "sensitive_fields",
+      "type": "array",
+      "required": false,
+      "description": "Known private, regulated, or sensitive fields to inspect."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 0.0,
+    "max_runs": 3,
+    "max_wall_clock_hours": 8.0,
+    "max_llm_usd": 8.0
+  },
+  "permissions": [
+    {
+      "id": "read-dataset",
+      "risk": "low",
+      "action": "read",
+      "target": "dataset-source-and-card",
+      "description": "Read dataset files, metadata, card, and sample rows."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "review-sensitive-samples",
+      "risk": "medium",
+      "action": "inspect",
+      "target": "potentially-sensitive-dataset-examples",
+      "description": "Inspect raw examples that may contain private or sensitive content."
+    },
+    {
+      "id": "publish-dataset-card",
+      "risk": "high",
+      "action": "publish",
+      "target": "dataset-card-or-audit-report",
+      "description": "Publish dataset card updates or audit report outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "fingerprint",
+      "name": "Fingerprint",
+      "objective": "Record dataset source, revision, file inventory, split mapping, and fingerprint.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["dataset-manifest"],
+      "approval_points": [],
+      "verifiers": ["dataset-fingerprint-captured"]
+    },
+    {
+      "id": "schema-and-splits",
+      "name": "Schema And Splits",
+      "objective": "Inspect features, types, nulls, split sizes, label mapping, and distribution drift.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["schema-report", "split-report"],
+      "approval_points": [],
+      "verifiers": ["schema-documented"]
+    },
+    {
+      "id": "quality-and-leakage",
+      "name": "Quality And Leakage",
+      "objective": "Check duplicates, leakage, imbalance, contamination, and label quality risks.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["quality-report", "leakage-report"],
+      "approval_points": ["review-sensitive-samples"],
+      "verifiers": ["leakage-checked"]
+    },
+    {
+      "id": "documentation",
+      "name": "Documentation",
+      "objective": "Review or draft dataset card metadata, license, intended use, limitations, and task tags.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["dataset-card-review"],
+      "approval_points": [],
+      "verifiers": ["dataset-card-reviewed"]
+    },
+    {
+      "id": "risk-report",
+      "name": "Risk Report",
+      "objective": "Produce a risk-ranked audit report with fixes, caveats, and publication decision points.",
+      "status": "pending",
+      "order": 5,
+      "required_outputs": ["audit-report", "verifier-verdict"],
+      "approval_points": ["publish-dataset-card"],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "dataset-manifest",
+      "type": "manifest",
+      "description": "Dataset source, revision, files, splits, and fingerprint."
+    },
+    {
+      "id": "schema-report",
+      "type": "markdown",
+      "description": "Feature types, nulls, examples, and schema issues."
+    },
+    {
+      "id": "split-report",
+      "type": "metrics",
+      "description": "Split sizes, label distributions, and drift indicators."
+    },
+    {
+      "id": "quality-report",
+      "type": "markdown",
+      "description": "Duplicate, imbalance, annotation, and quality findings."
+    },
+    {
+      "id": "leakage-report",
+      "type": "markdown",
+      "description": "Leakage, contamination, and overlap findings."
+    },
+    {
+      "id": "dataset-card-review",
+      "type": "markdown",
+      "description": "Dataset card metadata and documentation review."
+    },
+    {
+      "id": "audit-report",
+      "type": "markdown",
+      "description": "Final risk-ranked dataset audit."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "dataset-profile",
+      "type": "json",
+      "description": "Machine-readable profile of schema, splits, and distributions."
+    },
+    {
+      "id": "sample-review",
+      "type": "table",
+      "description": "Reviewed sample rows with redacted sensitive content where needed."
+    },
+    {
+      "id": "dataset-card-draft",
+      "type": "markdown",
+      "description": "Dataset card draft or patch notes."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "dataset-fingerprint-captured",
+      "type": "artifact",
+      "description": "Dataset source, revision, split mapping, and fingerprint are recorded."
+    },
+    {
+      "id": "schema-documented",
+      "type": "artifact",
+      "description": "Feature schema, labels, nulls, and split sizes are documented."
+    },
+    {
+      "id": "leakage-checked",
+      "type": "manual",
+      "description": "Duplicate, leakage, contamination, and sensitive-sample checks were performed or explicitly scoped out."
+    },
+    {
+      "id": "dataset-card-reviewed",
+      "type": "artifact",
+      "description": "Dataset card metadata, license, task tags, and limitations are reviewed."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Audit findings cite profile metrics, sample review notes, and dataset metadata."
+    }
+  ]
+}

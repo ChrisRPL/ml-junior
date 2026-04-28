@@ -1,0 +1,154 @@
+{
+  "id": "literature-overview",
+  "name": "Literature Overview",
+  "version": "v1",
+  "description": "Produce a short, source-grounded overview of a research topic, method, or paper cluster.",
+  "inputs": [
+    {
+      "id": "topic",
+      "type": "string",
+      "required": true,
+      "description": "Research topic, method, paper, or question to survey."
+    },
+    {
+      "id": "max_papers",
+      "type": "integer",
+      "required": false,
+      "default": 8,
+      "description": "Maximum number of papers to include."
+    },
+    {
+      "id": "time_window",
+      "type": "string",
+      "required": false,
+      "description": "Optional recency window or publication range."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 0.0,
+    "max_runs": 0,
+    "max_wall_clock_hours": 3.0,
+    "max_llm_usd": 5.0
+  },
+  "permissions": [
+    {
+      "id": "read-public-literature",
+      "risk": "low",
+      "action": "read",
+      "target": "papers-model-cards-and-dataset-cards",
+      "description": "Read public papers, Hugging Face Papers pages, model cards, dataset cards, and repository metadata."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-source-scope",
+      "risk": "low",
+      "action": "approve",
+      "target": "literature-source-set",
+      "description": "Confirm the selected paper set before final synthesis."
+    }
+  ],
+  "phases": [
+    {
+      "id": "scope",
+      "name": "Scope",
+      "objective": "Define topic, inclusion criteria, exclusions, and target audience.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["overview-brief"],
+      "approval_points": [],
+      "verifiers": ["scope-is-specific"]
+    },
+    {
+      "id": "source-selection",
+      "name": "Source Selection",
+      "objective": "Collect high-signal papers, model cards, dataset cards, and repositories with provenance links.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["source-table"],
+      "approval_points": ["approve-source-scope"],
+      "verifiers": ["sources-have-provenance"]
+    },
+    {
+      "id": "synthesis",
+      "name": "Synthesis",
+      "objective": "Compare methods, datasets, claims, evals, limitations, and open questions.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["literature-synthesis"],
+      "approval_points": [],
+      "verifiers": ["claims-have-sources"]
+    },
+    {
+      "id": "delivery",
+      "name": "Delivery",
+      "objective": "Produce a concise overview with citations, caveats, and next-step recommendations.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["overview-report", "verifier-verdict"],
+      "approval_points": [],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "overview-brief",
+      "type": "markdown",
+      "description": "Topic scope, audience, and inclusion criteria."
+    },
+    {
+      "id": "source-table",
+      "type": "table",
+      "description": "Selected papers, cards, repositories, dates, and links."
+    },
+    {
+      "id": "literature-synthesis",
+      "type": "markdown",
+      "description": "Comparison of methods, datasets, metrics, findings, and limitations."
+    },
+    {
+      "id": "overview-report",
+      "type": "markdown",
+      "description": "Final concise literature overview."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "paper-bibliography",
+      "type": "json",
+      "description": "Machine-readable bibliography and source metadata."
+    },
+    {
+      "id": "claim-matrix",
+      "type": "table",
+      "description": "Claims mapped to sources and evidence strength."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "scope-is-specific",
+      "type": "manual",
+      "description": "Topic, audience, and source inclusion criteria are explicit."
+    },
+    {
+      "id": "sources-have-provenance",
+      "type": "artifact",
+      "description": "Every selected source has a URL, title, publication or update date when available, and source type."
+    },
+    {
+      "id": "claims-have-sources",
+      "type": "artifact",
+      "description": "Major claims map to paper, model card, dataset card, or repository sources."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final recommendations and caveats are supported by the source table and claim matrix."
+    }
+  ]
+}

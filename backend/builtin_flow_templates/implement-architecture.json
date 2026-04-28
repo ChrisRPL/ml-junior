@@ -1,0 +1,199 @@
+{
+  "id": "implement-architecture",
+  "name": "Implement Architecture",
+  "version": "v1",
+  "description": "Implement a model architecture with interface, tensor-shape, smoke-training, and baseline evidence.",
+  "inputs": [
+    {
+      "id": "architecture_spec",
+      "type": "string",
+      "required": true,
+      "description": "Paper section, sketch, or natural language architecture request."
+    },
+    {
+      "id": "framework",
+      "type": "string",
+      "required": false,
+      "default": "pytorch",
+      "description": "Preferred implementation framework."
+    },
+    {
+      "id": "reference_model",
+      "type": "string",
+      "required": false,
+      "description": "Optional reference implementation or model identifier."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 3.0,
+    "max_runs": 4,
+    "max_wall_clock_hours": 12.0,
+    "max_llm_usd": 10.0
+  },
+  "permissions": [
+    {
+      "id": "read-reference-architecture",
+      "risk": "low",
+      "action": "read",
+      "target": "public-architecture-references",
+      "description": "Read public model code, docs, papers, and model cards."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "run-smoke-training",
+      "risk": "medium",
+      "action": "launch",
+      "target": "training-smoke-job",
+      "description": "Run a GPU or long CPU smoke-training job."
+    }
+  ],
+  "phases": [
+    {
+      "id": "requirements",
+      "name": "Requirements",
+      "objective": "Extract model purpose, inputs, outputs, constraints, and success checks.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["architecture-brief"],
+      "approval_points": [],
+      "verifiers": ["interfaces-defined"]
+    },
+    {
+      "id": "shape-plan",
+      "name": "Shape Plan",
+      "objective": "Define module boundaries, tensor shapes, parameterization, and initialization assumptions.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["shape-contract"],
+      "approval_points": [],
+      "verifiers": ["shape-contract-complete"]
+    },
+    {
+      "id": "minimal-implementation",
+      "name": "Minimal Implementation",
+      "objective": "Build the smallest usable architecture implementation consistent with local patterns.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["code-summary"],
+      "approval_points": [],
+      "verifiers": ["code-imports"]
+    },
+    {
+      "id": "tests",
+      "name": "Tests",
+      "objective": "Add unit, shape, serialization, and deterministic forward-pass tests.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["test-report"],
+      "approval_points": [],
+      "verifiers": ["shape-tests-pass"]
+    },
+    {
+      "id": "smoke-training",
+      "name": "Smoke Training",
+      "objective": "Run a minimal training loop and compare loss movement or sanity metrics.",
+      "status": "pending",
+      "order": 5,
+      "required_outputs": ["smoke-metrics", "run-log"],
+      "approval_points": ["run-smoke-training"],
+      "verifiers": ["smoke-metric-recorded"]
+    },
+    {
+      "id": "report",
+      "name": "Report",
+      "objective": "Summarize implementation choices, shape guarantees, test evidence, and remaining risks.",
+      "status": "pending",
+      "order": 6,
+      "required_outputs": ["architecture-report"],
+      "approval_points": [],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "architecture-brief",
+      "type": "markdown",
+      "description": "Model purpose, constraints, and interface expectations."
+    },
+    {
+      "id": "shape-contract",
+      "type": "markdown",
+      "description": "Tensor shape and module interface plan."
+    },
+    {
+      "id": "code-summary",
+      "type": "markdown",
+      "description": "Implemented files, public classes, and integration notes."
+    },
+    {
+      "id": "test-report",
+      "type": "log",
+      "description": "Unit and shape test command results."
+    },
+    {
+      "id": "smoke-metrics",
+      "type": "metrics",
+      "description": "Smoke-training loss or task metric."
+    },
+    {
+      "id": "run-log",
+      "type": "log",
+      "description": "Smoke run command, config, and exit status."
+    },
+    {
+      "id": "architecture-report",
+      "type": "markdown",
+      "description": "Final implementation report."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "model-source",
+      "type": "code",
+      "description": "Architecture implementation source files."
+    },
+    {
+      "id": "shape-test-fixtures",
+      "type": "test-fixture",
+      "description": "Deterministic inputs for shape and forward-pass tests."
+    },
+    {
+      "id": "smoke-run-config",
+      "type": "json",
+      "description": "Smoke-training configuration."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "interfaces-defined",
+      "type": "manual",
+      "description": "Inputs, outputs, dtypes, and framework constraints are explicit."
+    },
+    {
+      "id": "shape-contract-complete",
+      "type": "artifact",
+      "description": "Shape contract covers every public module boundary."
+    },
+    {
+      "id": "code-imports",
+      "type": "command",
+      "description": "Implementation imports without side effects or missing dependencies."
+    },
+    {
+      "id": "shape-tests-pass",
+      "type": "command",
+      "description": "Unit and tensor-shape tests pass."
+    },
+    {
+      "id": "smoke-metric-recorded",
+      "type": "metric",
+      "description": "Smoke-training metric or loss movement is recorded."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final report claims cite code, tests, metrics, or run logs."
+    }
+  ]
+}

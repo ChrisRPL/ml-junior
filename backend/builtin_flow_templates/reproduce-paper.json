@@ -1,0 +1,225 @@
+{
+  "id": "reproduce-paper",
+  "name": "Reproduce Paper",
+  "version": "v1",
+  "description": "Reproduce an ML paper from a paper URL, repository, or method description with evidence-backed metrics.",
+  "inputs": [
+    {
+      "id": "paper_url",
+      "type": "string",
+      "required": true,
+      "description": "Paper URL, arXiv identifier, or Hugging Face Papers link."
+    },
+    {
+      "id": "reference_repo",
+      "type": "string",
+      "required": false,
+      "description": "Optional code repository or implementation reference."
+    },
+    {
+      "id": "target_metric",
+      "type": "string",
+      "required": false,
+      "description": "Primary metric or paper table result to reproduce."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 8.0,
+    "max_runs": 6,
+    "max_wall_clock_hours": 24.0,
+    "max_llm_usd": 20.0
+  },
+  "permissions": [
+    {
+      "id": "read-paper-and-code",
+      "risk": "low",
+      "action": "read",
+      "target": "paper-repository-and-public-code",
+      "description": "Read linked papers, public repositories, model cards, and dataset cards."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "launch-reproduction-job",
+      "risk": "medium",
+      "action": "launch",
+      "target": "gpu-training-job",
+      "description": "Start the budgeted reproduction or baseline training run."
+    },
+    {
+      "id": "publish-reproduction-artifacts",
+      "risk": "medium",
+      "action": "publish",
+      "target": "hub-or-report-artifacts",
+      "description": "Publish or share reproduced artifacts outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "intake",
+      "name": "Intake",
+      "objective": "Capture paper target, available code, success metric, and reproduction constraints.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["reproduction-brief"],
+      "approval_points": [],
+      "verifiers": ["goal-is-testable"]
+    },
+    {
+      "id": "paper-extraction",
+      "name": "Paper Extraction",
+      "objective": "Extract method, datasets, splits, preprocessing, baselines, metrics, and claimed results.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["method-notes", "claim-table"],
+      "approval_points": [],
+      "verifiers": ["claims-have-sources"]
+    },
+    {
+      "id": "environment-and-data",
+      "name": "Environment And Data",
+      "objective": "Prepare reproducible environment and dataset revision or fingerprint before experiments.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["environment-snapshot", "dataset-manifest"],
+      "approval_points": [],
+      "verifiers": ["dataset-fingerprint-captured"]
+    },
+    {
+      "id": "baseline-run",
+      "name": "Baseline Run",
+      "objective": "Run a baseline or sanity check before reproducing the target method.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["baseline-metrics"],
+      "approval_points": ["launch-reproduction-job"],
+      "verifiers": ["baseline-compared"]
+    },
+    {
+      "id": "reproduction-run",
+      "name": "Reproduction Run",
+      "objective": "Run the target implementation and record metrics, configuration, logs, and artifacts.",
+      "status": "pending",
+      "order": 5,
+      "required_outputs": ["reproduction-metrics", "run-log"],
+      "approval_points": ["launch-reproduction-job"],
+      "verifiers": ["metric-recorded"]
+    },
+    {
+      "id": "verification",
+      "name": "Verification",
+      "objective": "Compare observed results against the paper and verify evidence for final claims.",
+      "status": "pending",
+      "order": 6,
+      "required_outputs": ["reproduction-report", "verifier-verdict"],
+      "approval_points": ["publish-reproduction-artifacts"],
+      "verifiers": ["environment-captured", "final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "reproduction-brief",
+      "type": "markdown",
+      "description": "Goal, target result, constraints, and available assets."
+    },
+    {
+      "id": "method-notes",
+      "type": "markdown",
+      "description": "Method extraction notes with citations."
+    },
+    {
+      "id": "claim-table",
+      "type": "table",
+      "description": "Claimed paper metrics, datasets, and baselines."
+    },
+    {
+      "id": "environment-snapshot",
+      "type": "manifest",
+      "description": "Runtime, dependency, hardware, and seed snapshot."
+    },
+    {
+      "id": "dataset-manifest",
+      "type": "manifest",
+      "description": "Dataset source, revision, splits, and fingerprint."
+    },
+    {
+      "id": "baseline-metrics",
+      "type": "metrics",
+      "description": "Baseline or sanity-check metrics."
+    },
+    {
+      "id": "reproduction-metrics",
+      "type": "metrics",
+      "description": "Target reproduction metrics."
+    },
+    {
+      "id": "run-log",
+      "type": "log",
+      "description": "Experiment command, config, stdout, stderr, and exit status."
+    },
+    {
+      "id": "reproduction-report",
+      "type": "markdown",
+      "description": "Final reproduction comparison and caveats."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "experiment-config",
+      "type": "json",
+      "description": "Reproduction configuration and seeds."
+    },
+    {
+      "id": "metrics-json",
+      "type": "json",
+      "description": "Machine-readable metric output."
+    },
+    {
+      "id": "reproducibility-report",
+      "type": "markdown",
+      "description": "Human-readable reproduction report."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "goal-is-testable",
+      "type": "manual",
+      "description": "The target metric, dataset, and comparison claim are specific enough to verify."
+    },
+    {
+      "id": "claims-have-sources",
+      "type": "artifact",
+      "description": "Extracted claims cite the paper section, table, repository, or model card source."
+    },
+    {
+      "id": "dataset-fingerprint-captured",
+      "type": "artifact",
+      "description": "Dataset source, revision, split mapping, and fingerprint are recorded."
+    },
+    {
+      "id": "baseline-compared",
+      "type": "metric",
+      "description": "Baseline metric exists and is compared with the reproduction result."
+    },
+    {
+      "id": "metric-recorded",
+      "type": "metric",
+      "description": "Target metric is present with units, split, and run identifier."
+    },
+    {
+      "id": "environment-captured",
+      "type": "artifact",
+      "description": "Environment, dependency versions, hardware class, and seeds are captured."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final report claims are supported by recorded metrics, logs, and source citations."
+    }
+  ]
+}

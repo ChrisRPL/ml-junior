@@ -1,0 +1,215 @@
+{
+  "id": "build-evaluation-harness",
+  "name": "Build Evaluation Harness",
+  "version": "v1",
+  "description": "Build an evaluation suite with task definition, datasets, metrics, baselines, reliability checks, and report artifacts.",
+  "inputs": [
+    {
+      "id": "eval_objective",
+      "type": "string",
+      "required": true,
+      "description": "Capability, risk, or benchmark target to evaluate."
+    },
+    {
+      "id": "candidate_systems",
+      "type": "array",
+      "required": false,
+      "description": "Models, prompts, or systems to compare."
+    },
+    {
+      "id": "dataset_source",
+      "type": "string",
+      "required": false,
+      "description": "Existing dataset, task suite, or seed examples."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 2.0,
+    "max_runs": 6,
+    "max_wall_clock_hours": 12.0,
+    "max_llm_usd": 12.0
+  },
+  "permissions": [
+    {
+      "id": "read-eval-sources",
+      "risk": "low",
+      "action": "read",
+      "target": "eval-datasets-models-and-task-docs",
+      "description": "Read public eval tasks, dataset cards, model cards, and benchmark documentation."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "run-eval-suite",
+      "risk": "medium",
+      "action": "launch",
+      "target": "evaluation-job",
+      "description": "Run the evaluation suite against candidate systems."
+    },
+    {
+      "id": "publish-eval-results",
+      "risk": "high",
+      "action": "publish",
+      "target": "eval-results-or-leaderboard",
+      "description": "Publish evaluation results, benchmark cards, or leaderboard data."
+    }
+  ],
+  "phases": [
+    {
+      "id": "objective",
+      "name": "Objective",
+      "objective": "Define capability, failure modes, target users, and scoring needs.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["eval-brief"],
+      "approval_points": [],
+      "verifiers": ["eval-goal-is-testable"]
+    },
+    {
+      "id": "dataset-and-metrics",
+      "name": "Dataset And Metrics",
+      "objective": "Create or select examples, splits, references, metrics, measurements, and comparison tests.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["eval-dataset-manifest", "metric-spec"],
+      "approval_points": [],
+      "verifiers": ["metric-spec-complete"]
+    },
+    {
+      "id": "scoring-code",
+      "name": "Scoring Code",
+      "objective": "Implement scoring adapters, task config, aggregation, and sample-level result capture.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["scoring-code-summary"],
+      "approval_points": [],
+      "verifiers": ["scoring-code-runs"]
+    },
+    {
+      "id": "baseline-systems",
+      "name": "Baseline Systems",
+      "objective": "Run baseline systems and record sample-level outputs for debugging.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["baseline-results", "sample-results"],
+      "approval_points": ["run-eval-suite"],
+      "verifiers": ["baseline-compared"]
+    },
+    {
+      "id": "reliability",
+      "name": "Reliability",
+      "objective": "Check reproducibility, sensitivity, annotation quality, and metric failure modes.",
+      "status": "pending",
+      "order": 5,
+      "required_outputs": ["reliability-report"],
+      "approval_points": [],
+      "verifiers": ["reliability-checked"]
+    },
+    {
+      "id": "report",
+      "name": "Report",
+      "objective": "Package eval suite, results, limitations, and optional publication notes.",
+      "status": "pending",
+      "order": 6,
+      "required_outputs": ["eval-report", "verifier-verdict"],
+      "approval_points": ["publish-eval-results"],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "eval-brief",
+      "type": "markdown",
+      "description": "Evaluation objective, users, risks, and acceptance criteria."
+    },
+    {
+      "id": "eval-dataset-manifest",
+      "type": "manifest",
+      "description": "Evaluation dataset source, splits, references, and fingerprint."
+    },
+    {
+      "id": "metric-spec",
+      "type": "markdown",
+      "description": "Metrics, comparisons, measurements, aggregation, and thresholds."
+    },
+    {
+      "id": "scoring-code-summary",
+      "type": "markdown",
+      "description": "Scoring code, task configuration, and adapter notes."
+    },
+    {
+      "id": "baseline-results",
+      "type": "metrics",
+      "description": "Baseline aggregate metrics and comparison results."
+    },
+    {
+      "id": "sample-results",
+      "type": "jsonl",
+      "description": "Sample-level predictions, references, scores, and metadata."
+    },
+    {
+      "id": "reliability-report",
+      "type": "markdown",
+      "description": "Reliability, sensitivity, and metric risk findings."
+    },
+    {
+      "id": "eval-report",
+      "type": "markdown",
+      "description": "Final evaluation report and limitations."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "eval-suite",
+      "type": "code",
+      "description": "Evaluation task and scoring implementation."
+    },
+    {
+      "id": "eval-results-jsonl",
+      "type": "jsonl",
+      "description": "Sample-level evaluation results."
+    },
+    {
+      "id": "eval-results-summary",
+      "type": "json",
+      "description": "Aggregate evaluation metrics."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "eval-goal-is-testable",
+      "type": "manual",
+      "description": "Evaluation objective maps to observable examples and metrics."
+    },
+    {
+      "id": "metric-spec-complete",
+      "type": "artifact",
+      "description": "Metrics, comparisons, measurements, aggregation, and thresholds are documented."
+    },
+    {
+      "id": "scoring-code-runs",
+      "type": "command",
+      "description": "Scoring code runs on a minimal example and emits expected fields."
+    },
+    {
+      "id": "baseline-compared",
+      "type": "metric",
+      "description": "At least one baseline or reference system result is recorded."
+    },
+    {
+      "id": "reliability-checked",
+      "type": "manual",
+      "description": "Reliability, sample-level debugging, and metric failure modes were checked."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final report claims cite metrics, sample results, and reliability notes."
+    }
+  ]
+}

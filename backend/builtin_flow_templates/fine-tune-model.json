@@ -1,0 +1,252 @@
+{
+  "id": "fine-tune-model",
+  "name": "Fine-Tune Model",
+  "version": "v1",
+  "description": "Fine-tune or adapt a pretrained model with dataset inspection, dry run, training, evaluation, and Hub-ready packaging.",
+  "inputs": [
+    {
+      "id": "base_model",
+      "type": "string",
+      "required": true,
+      "description": "Base model identifier or local checkpoint."
+    },
+    {
+      "id": "dataset",
+      "type": "string",
+      "required": true,
+      "description": "Dataset identifier, local path, or data source."
+    },
+    {
+      "id": "task",
+      "type": "string",
+      "required": true,
+      "description": "Task type such as classification, language modeling, embedding, or instruction tuning."
+    },
+    {
+      "id": "adapter_method",
+      "type": "string",
+      "required": false,
+      "default": "lora",
+      "description": "Adapter or full fine-tuning strategy."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 6.0,
+    "max_runs": 5,
+    "max_wall_clock_hours": 18.0,
+    "max_llm_usd": 15.0
+  },
+  "permissions": [
+    {
+      "id": "read-model-and-dataset",
+      "risk": "low",
+      "action": "read",
+      "target": "model-dataset-and-cards",
+      "description": "Read model repository, dataset repository, model card, and dataset card metadata."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "launch-training",
+      "risk": "medium",
+      "action": "launch",
+      "target": "fine-tuning-job",
+      "description": "Start the budgeted fine-tuning run."
+    },
+    {
+      "id": "push-to-hub",
+      "risk": "high",
+      "action": "publish",
+      "target": "huggingface-hub-repository",
+      "description": "Upload model weights, adapters, tokenizer, card, or evaluation results to the Hub."
+    }
+  ],
+  "phases": [
+    {
+      "id": "goal-and-base-model",
+      "name": "Goal And Base Model",
+      "objective": "Confirm target task, base model fit, license constraints, and success metric.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["fine-tuning-brief"],
+      "approval_points": [],
+      "verifiers": ["model-choice-justified"]
+    },
+    {
+      "id": "dataset-inspection",
+      "name": "Dataset Inspection",
+      "objective": "Load dataset source, capture revision, inspect splits, labels, examples, and privacy risks.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["dataset-manifest", "dataset-risk-notes"],
+      "approval_points": [],
+      "verifiers": ["dataset-fingerprint-captured"]
+    },
+    {
+      "id": "preprocessing-and-config",
+      "name": "Preprocessing And Config",
+      "objective": "Define tokenization, collator, label mapping, PEFT settings, training arguments, and metric function.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["training-config"],
+      "approval_points": [],
+      "verifiers": ["training-config-complete"]
+    },
+    {
+      "id": "dry-run",
+      "name": "Dry Run",
+      "objective": "Run a tiny batch through preprocessing, model forward pass, and evaluation wiring.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["dry-run-log"],
+      "approval_points": [],
+      "verifiers": ["dry-run-passed"]
+    },
+    {
+      "id": "training",
+      "name": "Training",
+      "objective": "Run fine-tuning within budget and capture logs, checkpoints, metrics, and trainable parameter count.",
+      "status": "pending",
+      "order": 5,
+      "required_outputs": ["training-metrics", "run-log"],
+      "approval_points": ["launch-training"],
+      "verifiers": ["metric-recorded"]
+    },
+    {
+      "id": "evaluation-and-error-analysis",
+      "name": "Evaluation And Error Analysis",
+      "objective": "Evaluate on held-out data, compare against baseline, and inspect representative errors.",
+      "status": "pending",
+      "order": 6,
+      "required_outputs": ["evaluation-report", "error-analysis"],
+      "approval_points": [],
+      "verifiers": ["baseline-compared"]
+    },
+    {
+      "id": "packaging",
+      "name": "Packaging",
+      "objective": "Prepare model card, dataset references, evaluation results, and optional Hub publication.",
+      "status": "pending",
+      "order": 7,
+      "required_outputs": ["model-card", "verifier-verdict"],
+      "approval_points": ["push-to-hub"],
+      "verifiers": ["model-card-complete", "final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "fine-tuning-brief",
+      "type": "markdown",
+      "description": "Task, base model, dataset, metric, and constraints."
+    },
+    {
+      "id": "dataset-manifest",
+      "type": "manifest",
+      "description": "Dataset source, revision, split mapping, and fingerprint."
+    },
+    {
+      "id": "dataset-risk-notes",
+      "type": "markdown",
+      "description": "Privacy, license, leakage, and quality risks."
+    },
+    {
+      "id": "training-config",
+      "type": "json",
+      "description": "Tokenizer, collator, label mapping, PEFT, TrainingArguments, and metric config."
+    },
+    {
+      "id": "dry-run-log",
+      "type": "log",
+      "description": "Dry-run command, output, and exit status."
+    },
+    {
+      "id": "training-metrics",
+      "type": "metrics",
+      "description": "Training and validation metrics."
+    },
+    {
+      "id": "run-log",
+      "type": "log",
+      "description": "Training command, environment, and exit status."
+    },
+    {
+      "id": "evaluation-report",
+      "type": "markdown",
+      "description": "Held-out evaluation, comparisons, and caveats."
+    },
+    {
+      "id": "error-analysis",
+      "type": "markdown",
+      "description": "Representative failure modes and data examples."
+    },
+    {
+      "id": "model-card",
+      "type": "markdown",
+      "description": "Hub-compatible model card draft."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "adapter-or-checkpoint",
+      "type": "model",
+      "description": "Fine-tuned adapter or model checkpoint."
+    },
+    {
+      "id": "eval-results",
+      "type": "json",
+      "description": "Machine-readable evaluation results."
+    },
+    {
+      "id": "model-card-readme",
+      "type": "markdown",
+      "description": "README.md model card with metadata."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "model-choice-justified",
+      "type": "manual",
+      "description": "Base model, license, and task compatibility are justified."
+    },
+    {
+      "id": "dataset-fingerprint-captured",
+      "type": "artifact",
+      "description": "Dataset source, revision, split mapping, and fingerprint are recorded."
+    },
+    {
+      "id": "training-config-complete",
+      "type": "artifact",
+      "description": "Preprocessing, collator, label mapping, PEFT, trainer, and metric configuration are captured."
+    },
+    {
+      "id": "dry-run-passed",
+      "type": "command",
+      "description": "Dry run completes preprocessing, forward pass, and metric wiring."
+    },
+    {
+      "id": "metric-recorded",
+      "type": "metric",
+      "description": "Training and validation metrics include split, step or epoch, and run identifier."
+    },
+    {
+      "id": "baseline-compared",
+      "type": "metric",
+      "description": "Fine-tuned result is compared with a baseline or base model metric."
+    },
+    {
+      "id": "model-card-complete",
+      "type": "artifact",
+      "description": "Model card includes intended use, limitations, datasets, training parameters, and evaluation results."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final report claims cite recorded metrics, card metadata, logs, and artifacts."
+    }
+  ]
+}
