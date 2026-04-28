@@ -285,7 +285,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     // (plus activityStatus when the processing→idle side-effect fires).
     // This prevents overwriting flat fields changed by global setters
     // (e.g. setPanelView called from CodePanel) with stale snapshot values.
-    let flatMirror: Record<string, unknown> = {};
+    const flatMirror: Record<string, unknown> = {};
     if (isActive) {
       for (const key of Object.keys(updates)) {
         flatMirror[key] = updated[key as keyof PerSessionState];
@@ -345,7 +345,8 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 
   clearSessionState: (sessionId) => {
     set((state) => {
-      const { [sessionId]: _, ...rest } = state.sessionStates;
+      const rest = { ...state.sessionStates };
+      delete rest[sessionId];
       return { sessionStates: rest };
     });
   },
