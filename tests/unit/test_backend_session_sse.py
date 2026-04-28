@@ -69,6 +69,7 @@ class FakeSession:
         self.pending_approval = None
         self.is_running = True
         self.sandbox = None
+        self._running_job_ids: set[str] = set()
         self._cancelled = False
         self.session_id = "agent-internal-before-alignment"
         self._next_event_sequence = 1
@@ -352,6 +353,181 @@ async def test_session_manager_lists_durable_metadata_after_restart(
         ]
         assert restarted.verify_session_access(session_id, "alice") is True
         assert await restarted.submit_user_input(session_id, "not restored") is False
+    finally:
+        await manager.delete_session(session_id)
+
+
+async def test_pending_approval_refs_persist_and_clear_after_approval(
+    manager,
+    offline_session_constructors,
+    monkeypatch,
+):
+    tool_call = SimpleNamespace(
+        id="tc_123",
+        function=SimpleNamespace(
+            name="hf_jobs",
+            arguments=json.dumps(
+                {
+                    "operation": "run",
+                    "hardware": "cpu-basic",
+                    "token": "hf_pendingsecret123456789",
+                }
+            ),
+        ),
+    )
+
+    async def fake_process_submission(session, submission):
+        if submission.operation.op_type == session_module.OpType.USER_INPUT:
+            session.pending_approval = {
+                "tool_calls": [tool_call],
+                "policy": {
+                    "tc_123": {
+                        "risk": "medium",
+                        "side_effects": ["remote_compute"],
+                        "rollback": "Cancel the job.",
+                        "budget_impact": "May incur CPU compute costs.",
+                        "credential_usage": ["hf_token"],
+                        "reason": "CPU job launch requires approval.",
+                    }
+                },
+            }
+        elif submission.operation.op_type == session_module.OpType.EXEC_APPROVAL:
+            session.pending_approval = None
+        return True
+
+    monkeypatch.setattr(
+        session_module,
+        "process_submission",
+        fake_process_submission,
+    )
+
+    session_id = await manager.create_session(user_id="alice")
+
+    try:
+        assert await manager.submit_user_input(session_id, "run job") is True
+        await _wait_until(
+            lambda: manager.session_store.get(session_id).pending_approval_refs
+        )
+
+        record = manager.session_store.get(session_id)
+        assert record is not None
+        assert record.pending_approval_refs == [
+            {
+                "tool": "hf_jobs",
+                "tool_call_id": "tc_123",
+                "arguments": {
+                    "operation": "run",
+                    "hardware": "cpu-basic",
+                    "token": "[REDACTED]",
+                },
+                "risk": "medium",
+                "side_effects": ["remote_compute"],
+                "rollback": "Cancel the job.",
+                "budget_impact": "May incur CPU compute costs.",
+                "credential_usage": ["hf_token"],
+                "reason": "CPU job launch requires approval.",
+            }
+        ]
+
+        assert await manager.submit_approval(
+            session_id,
+            [{"tool_call_id": "tc_123", "approved": True}],
+        ) is True
+        await _wait_until(
+            lambda: manager.session_store.get(session_id).pending_approval_refs == []
+        )
+    finally:
+        await manager.delete_session(session_id)
+
+
+async def test_active_job_refs_persist_while_job_runs_and_clear_when_empty(
+    manager,
+    offline_session_constructors,
+    monkeypatch,
+):
+    job_started = asyncio.Event()
+    release_job = asyncio.Event()
+
+    async def fake_process_submission(session, _submission):
+        session._running_job_ids.update({"job-b", "job-a"})
+        await session.send_event(
+            Event(
+                event_type="tool_state_change",
+                data={
+                    "tool": "hf_jobs",
+                    "tool_call_id": "tc_job",
+                    "state": "running",
+                },
+            )
+        )
+        job_started.set()
+        await release_job.wait()
+        session._running_job_ids.clear()
+        await session.send_event(
+            Event(
+                event_type="tool_state_change",
+                data={
+                    "tool": "hf_jobs",
+                    "tool_call_id": "tc_job",
+                    "state": "succeeded",
+                },
+            )
+        )
+        return True
+
+    monkeypatch.setattr(
+        session_module,
+        "process_submission",
+        fake_process_submission,
+    )
+
+    session_id = await manager.create_session(user_id="alice")
+
+    try:
+        assert await manager.submit_user_input(session_id, "run job") is True
+        await asyncio.wait_for(job_started.wait(), timeout=1)
+        await _wait_until(
+            lambda: manager.session_store.get(session_id).active_job_refs
+            == [{"job_id": "job-a"}, {"job_id": "job-b"}]
+        )
+
+        release_job.set()
+        await _wait_until(
+            lambda: manager.session_store.get(session_id).active_job_refs == []
+        )
+    finally:
+        release_job.set()
+        await manager.delete_session(session_id)
+
+
+async def test_session_ref_snapshots_clear_when_session_deleted(
+    manager,
+    offline_session_constructors,
+):
+    tool_call = SimpleNamespace(
+        id="tc_delete",
+        function=SimpleNamespace(name="hf_jobs", arguments="{}"),
+    )
+    session_id = await manager.create_session(user_id="alice")
+
+    try:
+        live_session = manager.sessions[session_id].session
+        live_session.pending_approval = {"tool_calls": [tool_call], "policy": {}}
+        live_session._running_job_ids.add("job-delete")
+        manager._snapshot_live_session_refs(session_id)
+
+        record = manager.session_store.get(session_id)
+        assert record.pending_approval_refs == [
+            {"tool": "hf_jobs", "tool_call_id": "tc_delete", "arguments": {}}
+        ]
+        assert record.active_job_refs == [{"job_id": "job-delete"}]
+
+        assert await manager.delete_session(session_id) is True
+        closed = manager.session_store.get(session_id)
+        assert closed is not None
+        assert closed.status == SESSION_CLOSED
+        assert closed.pending_approval_refs == []
+        assert closed.active_job_refs == []
     finally:
         await manager.delete_session(session_id)
 

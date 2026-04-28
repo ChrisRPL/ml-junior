@@ -1,6 +1,7 @@
 """Session manager for handling multiple concurrent agent sessions."""
 
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -88,9 +89,11 @@ class EventBroadcaster:
         self,
         event_queue: asyncio.Queue,
         event_store: SQLiteEventStore | None = None,
+        on_event: Any | None = None,
     ):
         self._source = event_queue
         self._event_store = event_store
+        self._on_event = on_event
         self._subscribers: dict[int, asyncio.Queue] = {}
         self._counter = 0
 
@@ -117,6 +120,8 @@ class EventBroadcaster:
                     if isinstance(event, AgentEvent)
                     else event_to_legacy_dict(event)
                 )
+                if self._on_event is not None:
+                    self._on_event(msg)
                 for q in self._subscribers.values():
                     await q.put(msg)
             except asyncio.CancelledError:
@@ -264,6 +269,8 @@ class SessionManager:
     def _mark_session_closed(self, session_id: str) -> None:
         try:
             if self.session_store.get(session_id) is not None:
+                self.session_store.update_pending_approval_refs(session_id, [])
+                self.session_store.update_active_job_refs(session_id, [])
                 self.session_store.update_status(session_id, SESSION_CLOSED)
         except Exception as e:
             logger.warning("Session record update failed for %s: %s", session_id, e)
@@ -280,6 +287,59 @@ class SessionManager:
             "pending_approval": None,
             "model": record.model,
         }
+
+    @staticmethod
+    def _pending_approval_refs(session: Any) -> list[dict[str, Any]]:
+        pending_approval = getattr(session, "pending_approval", None)
+        if not pending_approval or not pending_approval.get("tool_calls"):
+            return []
+
+        refs: list[dict[str, Any]] = []
+        policy_by_tool_call_id = pending_approval.get("policy") or {}
+        for tc in pending_approval["tool_calls"]:
+            try:
+                args = json.loads(tc.function.arguments)
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                args = {}
+            policy = policy_by_tool_call_id.get(tc.id) or {}
+            refs.append({
+                "tool": tc.function.name,
+                "tool_call_id": tc.id,
+                "arguments": args,
+                **policy,
+            })
+        return refs
+
+    @staticmethod
+    def _active_job_refs(session: Any) -> list[dict[str, str]]:
+        job_ids = getattr(session, "_running_job_ids", None) or set()
+        return [
+            {"job_id": job_id}
+            for job_id in sorted(str(job_id) for job_id in job_ids)
+        ]
+
+    def _snapshot_live_session_refs(
+        self,
+        session_id: str,
+        agent_session: AgentSession | None = None,
+    ) -> None:
+        agent_session = agent_session or self.sessions.get(session_id)
+        if agent_session is None:
+            return
+
+        try:
+            if self.session_store.get(session_id) is None:
+                return
+            self.session_store.update_pending_approval_refs(
+                session_id,
+                self._pending_approval_refs(agent_session.session),
+            )
+            self.session_store.update_active_job_refs(
+                session_id,
+                self._active_job_refs(agent_session.session),
+            )
+        except Exception as e:
+            logger.warning("Session ref snapshot failed for %s: %s", session_id, e)
 
     def _count_user_sessions(self, user_id: str) -> int:
         """Count active sessions owned by a specific user."""
@@ -483,7 +543,13 @@ class SessionManager:
         session = agent_session.session
 
         # Start event broadcaster task
-        broadcaster = EventBroadcaster(event_queue, event_store=self.event_store)
+        broadcaster = EventBroadcaster(
+            event_queue,
+            event_store=self.event_store,
+            on_event=lambda _event: self._snapshot_live_session_refs(
+                session_id, agent_session
+            ),
+        )
         agent_session.broadcaster = broadcaster
         broadcast_task = asyncio.create_task(broadcaster.run())
 
@@ -516,6 +582,9 @@ class SessionManager:
                             )
                         finally:
                             agent_session.is_processing = False
+                            self._snapshot_live_session_refs(
+                                session_id, agent_session
+                            )
                         if not should_continue:
                             break
                     except asyncio.TimeoutError:
@@ -745,25 +814,7 @@ class SessionManager:
                 return None
             return self._session_record_info(record)
 
-        # Extract pending approval tools if any
-        pending_approval = None
-        pa = agent_session.session.pending_approval
-        if pa and pa.get("tool_calls"):
-            pending_approval = []
-            policy_by_tool_call_id = pa.get("policy") or {}
-            for tc in pa["tool_calls"]:
-                import json
-                try:
-                    args = json.loads(tc.function.arguments)
-                except (json.JSONDecodeError, AttributeError):
-                    args = {}
-                policy = policy_by_tool_call_id.get(tc.id) or {}
-                pending_approval.append({
-                    "tool": tc.function.name,
-                    "tool_call_id": tc.id,
-                    "arguments": args,
-                    **policy,
-                })
+        pending_approval_refs = self._pending_approval_refs(agent_session.session)
 
         return {
             "session_id": session_id,
@@ -772,7 +823,7 @@ class SessionManager:
             "is_processing": agent_session.is_processing,
             "message_count": len(agent_session.session.context_manager.items),
             "user_id": agent_session.user_id,
-            "pending_approval": pending_approval,
+            "pending_approval": pending_approval_refs or None,
             "model": agent_session.session.config.model_name,
         }
 
