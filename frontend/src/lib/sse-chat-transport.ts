@@ -17,6 +17,7 @@ import { createEventCursorFilterStream, createSSEParserStream } from '@/lib/sse-
 // Side-channel callback interface (non-chat events forwarded to the store)
 // ---------------------------------------------------------------------------
 export interface SideChannelCallbacks {
+  onEvent?: (event: AgentEvent) => void;
   onReady: () => void;
   onShutdown: () => void;
   onError: (error: string) => void;
@@ -57,6 +58,8 @@ function createEventToChunkStream(sideChannel: SideChannelCallbacks): TransformS
 
   return new TransformStream<AgentEvent, UIMessageChunk>({
     transform(event, controller) {
+      sideChannel.onEvent?.(event);
+
       switch (event.event_type) {
         // -- Side-channel only events ----------------------------------------
         case 'ready':

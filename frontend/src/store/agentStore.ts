@@ -17,6 +17,9 @@
  */
 import { create } from 'zustand';
 import type { User } from '@/types/agent';
+import type { AgentEvent } from '@/types/events';
+import type { ProjectSnapshot } from '@/types/project';
+import { reduceProjectSnapshotEvent } from '@/lib/project-projection';
 
 export interface PlanItem {
   id: string;
@@ -99,6 +102,7 @@ const defaultSessionState: PerSessionState = {
 interface AgentStore {
   // ── Per-session state map ───────────────────────────────────────────
   sessionStates: Record<string, PerSessionState>;
+  projectSnapshots: Record<string, ProjectSnapshot>;
   activeSessionId: string | null;
 
   // ── Flat state (mirrors active session — UI reads from here) ────────
@@ -118,6 +122,7 @@ interface AgentStore {
 
   // Plan
   plan: PlanItem[];
+  activeProjectSnapshot: ProjectSnapshot | null;
 
   // Edited scripts (tool_call_id -> edited content)
   editedScripts: Record<string, string>;
@@ -147,6 +152,15 @@ interface AgentStore {
 
   /** Remove a session's state from the map. */
   clearSessionState: (sessionId: string) => void;
+
+  /** Apply a durable/replayable agent event to this session's project snapshot. */
+  applyProjectEvent: (sessionId: string, event: AgentEvent, durableSnapshot?: ProjectSnapshot | null) => void;
+
+  /** Directly replace a session's projected project snapshot. */
+  setProjectSnapshot: (sessionId: string, snapshot: ProjectSnapshot | null) => void;
+
+  /** Get a projected project snapshot for a session. */
+  getProjectSnapshot: (sessionId: string) => ProjectSnapshot | null;
 
   // ── Global actions (not per-session) ────────────────────────────────
   setProcessing: (isProcessing: boolean) => void;
@@ -242,6 +256,7 @@ function saveRejectedTools(rejected: Record<string, boolean>): void {
 
 export const useAgentStore = create<AgentStore>()((set, get) => ({
   sessionStates: {},
+  projectSnapshots: {},
   activeSessionId: null,
 
   isProcessing: false,
@@ -257,6 +272,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
   panelEditable: false,
 
   plan: [],
+  activeProjectSnapshot: null,
 
   editedScripts: {},
   jobUrls: {},
@@ -332,6 +348,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     set({
       activeSessionId: sessionId,
       sessionStates: updatedStates,
+      activeProjectSnapshot: state.projectSnapshots[sessionId] ?? null,
       isProcessing: incoming.isProcessing,
       activityStatus: incoming.activityStatus,
       panelData: incoming.panelData,
@@ -347,9 +364,44 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     set((state) => {
       const rest = { ...state.sessionStates };
       delete rest[sessionId];
-      return { sessionStates: rest };
+      const projectSnapshots = { ...state.projectSnapshots };
+      delete projectSnapshots[sessionId];
+      return {
+        sessionStates: rest,
+        projectSnapshots,
+        ...(state.activeSessionId === sessionId ? { activeProjectSnapshot: null } : {}),
+      };
     });
   },
+
+  applyProjectEvent: (sessionId, event, durableSnapshot) => {
+    set((state) => {
+      const current = state.projectSnapshots[sessionId] ?? null;
+      const eventForSession = event.session_id ? event : { ...event, session_id: sessionId };
+      const snapshot = reduceProjectSnapshotEvent(current, eventForSession, durableSnapshot);
+      return {
+        projectSnapshots: { ...state.projectSnapshots, [sessionId]: snapshot },
+        ...(state.activeSessionId === sessionId ? { activeProjectSnapshot: snapshot } : {}),
+      };
+    });
+  },
+
+  setProjectSnapshot: (sessionId, snapshot) => {
+    set((state) => {
+      const projectSnapshots = { ...state.projectSnapshots };
+      if (snapshot) {
+        projectSnapshots[sessionId] = snapshot;
+      } else {
+        delete projectSnapshots[sessionId];
+      }
+      return {
+        projectSnapshots,
+        ...(state.activeSessionId === sessionId ? { activeProjectSnapshot: snapshot } : {}),
+      };
+    });
+  },
+
+  getProjectSnapshot: (sessionId) => get().projectSnapshots[sessionId] ?? null,
 
   // ── Global flags ──────────────────────────────────────────────────
 

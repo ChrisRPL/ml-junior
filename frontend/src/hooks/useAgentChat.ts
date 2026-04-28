@@ -47,6 +47,9 @@ export function useAgentChat({ sessionId, isActive, onReady, onError, onSessionD
   // -- Build side-channel callbacks (stable ref) --------------------------
   const sideChannel = useMemo<SideChannelCallbacks>(
     () => ({
+      onEvent: (event: AgentEvent) => {
+        useAgentStore.getState().applyProjectEvent(sessionId, event);
+      },
       onReady: () => {
         updateSession(sessionId, { isProcessing: false });
         if (isActiveRef.current) {
@@ -523,6 +526,7 @@ export function useAgentChat({ sessionId, isActive, onReady, onError, onSessionD
         while (true) {
           const { value: event, done } = await reader.read();
           if (done || signal.aborted) break;
+          sideChannel.onEvent?.(event);
 
           const et = event.event_type as AgentEvent['event_type'];
           if (et === 'processing') sideChannel.onProcessing();
