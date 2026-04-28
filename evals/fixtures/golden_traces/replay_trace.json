@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "name": "offline_replay_trace",
+  "mode": "offline",
+  "inputs": {
+    "session_id": "session-golden-replay",
+    "after_sequence": 1
+  },
+  "events": [
+    {
+      "schema_version": 1,
+      "session_id": "session-golden-replay",
+      "sequence": 1,
+      "event_type": "processing",
+      "data": {
+        "message": "offline fixture turn started"
+      },
+      "redaction_status": "none",
+      "legacy_sse": {
+        "event_type": "processing",
+        "data": {
+          "message": "offline fixture turn started"
+        }
+      }
+    },
+    {
+      "schema_version": 1,
+      "session_id": "session-golden-replay",
+      "sequence": 2,
+      "event_type": "tool_output",
+      "data": {
+        "tool": "hf_jobs",
+        "tool_call_id": "tc_redacted",
+        "output": "Authorization: Bearer [REDACTED]",
+        "success": true
+      },
+      "redaction_status": "partial",
+      "legacy_sse": {
+        "event_type": "tool_output",
+        "data": {
+          "tool": "hf_jobs",
+          "tool_call_id": "tc_redacted",
+          "output": "Authorization: Bearer [REDACTED]",
+          "success": true
+        }
+      }
+    },
+    {
+      "schema_version": 1,
+      "session_id": "session-golden-replay",
+      "sequence": 3,
+      "event_type": "turn_complete",
+      "data": {
+        "history_size": 2
+      },
+      "redaction_status": "none",
+      "legacy_sse": {
+        "event_type": "turn_complete",
+        "data": {
+          "history_size": 2
+        }
+      }
+    }
+  ],
+  "expected": {
+    "replay_after_sequence": {
+      "sequence": 1,
+      "event_types": [
+        "tool_output",
+        "turn_complete"
+      ]
+    },
+    "terminal_event": "turn_complete",
+    "redaction_status_by_sequence": {
+      "1": "none",
+      "2": "partial",
+      "3": "none"
+    },
+    "legacy_sse_keys": [
+      "event_type",
+      "data"
+    ]
+  },
+  "ignore_fields": [
+    "id",
+    "timestamp"
+  ]
+}

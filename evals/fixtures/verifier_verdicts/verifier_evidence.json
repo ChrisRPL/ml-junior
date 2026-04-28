@@ -1,0 +1,40 @@
+{
+  "claims": [
+    {
+      "id": "claim-final-output",
+      "text": "The run completed with a terminal turn_complete event.",
+      "evidence_refs": [
+        "event-sequence-3"
+      ]
+    },
+    {
+      "id": "claim-metric",
+      "text": "The run improved benchmark accuracy.",
+      "evidence_refs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "event-sequence-3",
+      "type": "golden_trace_event",
+      "ref": "golden_traces/replay_trace.json#/events/2",
+      "summary": "Sequence 3 is a turn_complete event with history_size 2."
+    }
+  ],
+  "checks": [
+    {
+      "name": "terminal-event-has-evidence",
+      "claim_id": "claim-final-output",
+      "status": "pass",
+      "reason": "The claim cites the terminal event fixture."
+    },
+    {
+      "name": "metric-claim-needs-evidence",
+      "claim_id": "claim-metric",
+      "status": "fail",
+      "reason": "No metric evidence is attached to the benchmark accuracy claim."
+    }
+  ],
+  "verdict": "fail",
+  "reason": "One supported final-output claim passed, and one metric claim failed because it has no evidence."
+}
