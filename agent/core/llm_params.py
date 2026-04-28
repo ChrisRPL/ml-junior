@@ -6,6 +6,17 @@ creating circular imports.
 """
 
 import os
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ProviderCapability:
+    name: str
+    prefix: str
+    efforts: frozenset[str]
+    credential_env: str | None
+    uses_hf_router: bool = False
+    sends_hf_billing_headers: bool = False
 
 
 def _patch_litellm_effort_validation() -> None:
@@ -66,14 +77,53 @@ _patch_litellm_effort_validation()
 
 # Effort levels accepted on the wire.
 #   Anthropic (4.6+):  low | medium | high | xhigh | max   (output_config.effort)
-#   OpenAI direct:     minimal | low | medium | high       (reasoning_effort top-level)
+#   OpenAI direct:     none | low | medium | high | xhigh  (current GPT-5.4/5.5)
+#                      minimal | low | medium | high        (legacy GPT-5/o-series)
+#                      sent as reasoning_effort top-level
 #   HF router:         low | medium | high                 (extra_body.reasoning_effort)
 #
 # We validate *shape* here and let the probe cascade walk down on rejection;
 # we deliberately do NOT maintain a per-model capability table.
 _ANTHROPIC_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
-_OPENAI_EFFORTS = {"minimal", "low", "medium", "high"}
+_OPENAI_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 _HF_EFFORTS = {"low", "medium", "high"}
+
+_PROVIDER_REGISTRY = {
+    "anthropic": ProviderCapability(
+        name="anthropic",
+        prefix="anthropic/",
+        efforts=frozenset(_ANTHROPIC_EFFORTS),
+        credential_env="ANTHROPIC_API_KEY",
+    ),
+    "bedrock": ProviderCapability(
+        name="bedrock",
+        prefix="bedrock/",
+        efforts=frozenset(),
+        credential_env=None,
+    ),
+    "openai": ProviderCapability(
+        name="openai",
+        prefix="openai/",
+        efforts=frozenset(_OPENAI_EFFORTS),
+        credential_env="OPENAI_API_KEY",
+    ),
+    "hf_router": ProviderCapability(
+        name="hf_router",
+        prefix="",
+        efforts=frozenset(_HF_EFFORTS),
+        credential_env="HF_TOKEN",
+        uses_hf_router=True,
+        sends_hf_billing_headers=True,
+    ),
+}
+
+
+def _provider_for_model(model_name: str) -> ProviderCapability:
+    for key in ("anthropic", "bedrock", "openai"):
+        provider = _PROVIDER_REGISTRY[key]
+        if model_name.startswith(provider.prefix):
+            return provider
+    return _PROVIDER_REGISTRY["hf_router"]
 
 
 class UnsupportedEffortError(ValueError):
@@ -131,13 +181,15 @@ def _resolve_llm_params(
       2. session.hf_token — the user's own token (CLI / OAuth / cache file).
       3. HF_TOKEN env — belt-and-suspenders fallback for CLI users.
     """
-    if model_name.startswith("anthropic/"):
+    provider = _provider_for_model(model_name)
+
+    if provider.name == "anthropic":
         params: dict = {"model": model_name}
         if reasoning_effort:
             level = reasoning_effort
             if level == "minimal":
                 level = "low"
-            if level not in _ANTHROPIC_EFFORTS:
+            if level not in provider.efforts:
                 if strict:
                     raise UnsupportedEffortError(
                         f"Anthropic doesn't accept effort={level!r}"
@@ -154,7 +206,7 @@ def _resolve_llm_params(
                 params["output_config"] = {"effort": level}
         return params
 
-    if model_name.startswith("bedrock/"):
+    if provider.name == "bedrock":
         # LiteLLM routes ``bedrock/...`` through the Converse adapter, which
         # picks up AWS credentials from the standard env vars
         # (``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` / ``AWS_REGION``).
@@ -162,10 +214,10 @@ def _resolve_llm_params(
         # the same way, so we leave it off for now.
         return {"model": model_name}
 
-    if model_name.startswith("openai/"):
+    if provider.name == "openai":
         params = {"model": model_name}
         if reasoning_effort:
-            if reasoning_effort not in _OPENAI_EFFORTS:
+            if reasoning_effort not in provider.efforts:
                 if strict:
                     raise UnsupportedEffortError(
                         f"OpenAI doesn't accept effort={reasoning_effort!r}"

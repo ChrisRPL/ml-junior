@@ -24,7 +24,24 @@ const getHfAvatarUrl = (modelId: string) => {
   return `https://huggingface.co/api/avatars/${org}`;
 };
 
+const OPENAI_AVATAR_URL = 'https://openai.com/favicon.ico';
+
 const MODEL_OPTIONS: ModelOption[] = [
+  {
+    id: 'gpt-5.5',
+    name: 'GPT-5.5',
+    description: 'OpenAI',
+    modelPath: 'openai/gpt-5.5',
+    avatarUrl: OPENAI_AVATAR_URL,
+    recommended: true,
+  },
+  {
+    id: 'gpt-5.4',
+    name: 'GPT-5.4',
+    description: 'OpenAI',
+    modelPath: 'openai/gpt-5.4',
+    avatarUrl: OPENAI_AVATAR_URL,
+  },
   {
     id: 'kimi-k2.6',
     name: 'Kimi K2.6',

@@ -41,7 +41,7 @@ class Config(BaseModel):
     # burn tokens thinking than ship a wrong ML recipe; the cascade lands on
     # whichever level the model supports (``high`` for GPT-5 / HF router,
     # ``xhigh`` or ``max`` for Anthropic 4.6 / 4.7). ``None`` = thinking off.
-    # Valid values: None | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+    # Valid values: None | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
     reasoning_effort: str | None = "max"
 
 

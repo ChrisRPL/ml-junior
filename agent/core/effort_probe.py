@@ -40,6 +40,7 @@ _EFFORT_CASCADE: dict[str, list[str]] = {
     "xhigh":   ["xhigh", "high", "medium", "low"],
     "high":    ["high", "medium", "low"],
     "medium":  ["medium", "low"],
+    "none":    ["none"],
     "minimal": ["minimal", "low"],
     "low":     ["low"],
 }

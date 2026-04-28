@@ -49,6 +49,19 @@ router = APIRouter(prefix="/api", tags=["agent"])
 
 AVAILABLE_MODELS = [
     {
+        "id": "openai/gpt-5.5",
+        "label": "GPT-5.5",
+        "provider": "openai",
+        "tier": "pro",
+        "recommended": True,
+    },
+    {
+        "id": "openai/gpt-5.4",
+        "label": "GPT-5.4",
+        "provider": "openai",
+        "tier": "pro",
+    },
+    {
         "id": "moonshotai/Kimi-K2.6",
         "label": "Kimi K2.6",
         "provider": "huggingface",
@@ -81,13 +94,18 @@ def _is_anthropic_model(model_id: str) -> bool:
     return "anthropic" in model_id
 
 
+def _is_openai_model(model_id: str) -> bool:
+    return model_id.startswith("openai/")
+
+
 async def _require_hf_for_anthropic(request: Request, model_id: str) -> None:
     """403 if a non-``huggingface``-org user tries to select an Anthropic model.
 
-    Anthropic models are billed to the Space's ``ANTHROPIC_API_KEY``; every
-    other model in ``AVAILABLE_MODELS`` is routed through HF Router and
-    billed via ``X-HF-Bill-To``. The gate only fires for Anthropic so
-    non-HF users can still freely switch between the free models.
+    Anthropic models are billed to the Space's ``ANTHROPIC_API_KEY``.
+    OpenAI direct models use the server's ``OPENAI_API_KEY``. HF models are
+    routed through HF Router and billed via ``X-HF-Bill-To``. The gate only
+    fires for Anthropic so non-HF users can still freely switch between the
+    free and OpenAI-configured models.
 
     Pattern: https://github.com/huggingface/ml-intern/pull/63
     """
@@ -104,6 +122,24 @@ async def _require_hf_for_anthropic(request: Request, model_id: str) -> None:
                 ),
             },
         )
+
+
+def _require_openai_configured(model_id: str) -> None:
+    """Fail fast when direct OpenAI inference is selected without credentials."""
+    if not _is_openai_model(model_id):
+        return
+    if os.environ.get("OPENAI_API_KEY"):
+        return
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "error": "openai_api_key_missing",
+            "message": (
+                "Direct OpenAI inference requires OPENAI_API_KEY on the server. "
+                "Set OPENAI_API_KEY=sk-... or choose a Hugging Face Router model."
+            ),
+        },
+    )
 
 
 async def _enforce_claude_quota(
@@ -333,6 +369,7 @@ async def create_session(
     # is Anthropic; free models pass through.
     resolved_model = model or session_manager.config.model_name
     await _require_hf_for_anthropic(request, resolved_model)
+    _require_openai_configured(resolved_model)
 
     try:
         session_id = await session_manager.create_session(
@@ -376,6 +413,7 @@ async def restore_session_summary(
 
     resolved_model = model or session_manager.config.model_name
     await _require_hf_for_anthropic(request, resolved_model)
+    _require_openai_configured(resolved_model)
 
     try:
         session_id = await session_manager.create_session(
@@ -467,6 +505,7 @@ async def set_session_model(
     if model_id not in valid_ids:
         raise HTTPException(status_code=400, detail=f"Unknown model: {model_id}")
     await _require_hf_for_anthropic(request, model_id)
+    _require_openai_configured(model_id)
     agent_session = session_manager.sessions.get(session_id)
     if not agent_session:
         raise HTTPException(status_code=404, detail="Session not found")

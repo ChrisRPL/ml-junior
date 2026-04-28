@@ -50,6 +50,26 @@ def test_redaction_marker_is_idempotent_for_env_assignments():
     assert twice == once
 
 
+def test_redacts_openai_api_keys_in_strings_and_structures():
+    raw = (
+        "OPENAI_API_KEY=sk-proj-openai1234567890 and "
+        "Authorization: Bearer sk-openai1234567890"
+    )
+
+    result = redact_string(raw)
+
+    assert result.status == REDACTION_PARTIAL
+    assert "sk-proj-openai1234567890" not in result.value
+    assert "sk-openai1234567890" not in result.value
+    assert "OPENAI_API_KEY=[REDACTED]" in result.value
+    assert "Authorization: Bearer [REDACTED]" in result.value
+
+    structured = redact_value({"OPENAI_API_KEY": "sk-proj-openai1234567890"})
+
+    assert structured.status == REDACTION_REDACTED
+    assert structured.value == {"OPENAI_API_KEY": REDACTED}
+
+
 def test_redacts_job_logs_opaque_auth_keys_query_secrets_and_local_paths():
     seeded_values = [
         "hf_joblogsecret123456789",

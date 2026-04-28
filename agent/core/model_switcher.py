@@ -24,6 +24,8 @@ from agent.core.effort_probe import ProbeInconclusive, probe_effort
 # ":cheapest" / ":preferred" / ":<provider>" to override the default
 # routing policy (auto = fastest with failover).
 SUGGESTED_MODELS = [
+    {"id": "openai/gpt-5.5", "label": "GPT-5.5"},
+    {"id": "openai/gpt-5.4", "label": "GPT-5.4"},
     {"id": "bedrock/us.anthropic.claude-opus-4-7", "label": "Claude Opus 4.7"},
     {"id": "bedrock/us.anthropic.claude-opus-4-6-v1", "label": "Claude Opus 4.6"},
     {"id": "MiniMaxAI/MiniMax-M2.7", "label": "MiniMax M2.7"},
@@ -150,6 +152,28 @@ def print_invalid_id(arg: str, console) -> None:
     )
 
 
+def _format_switch_error(model_id: str, error: Exception) -> str:
+    message = str(error)
+    lower = message.lower()
+    is_auth_error = any(
+        marker in lower
+        for marker in (
+            "authentication",
+            "unauthorized",
+            "invalid api key",
+            "api key",
+            "api_key",
+        )
+    )
+    if model_id.startswith("openai/") and is_auth_error:
+        return (
+            f"{message}\n"
+            "OpenAI direct inference uses OPENAI_API_KEY. "
+            "Set it with: export OPENAI_API_KEY=sk-..."
+        )
+    return message
+
+
 async def probe_and_switch_model(
     model_id: str,
     config,
@@ -194,7 +218,9 @@ async def probe_and_switch_model(
         return
     except Exception as e:
         # Hard persistent error — auth, unknown model, quota. Don't switch.
-        console.print(f"[bold red]Switch failed:[/bold red] {e}")
+        console.print(
+            f"[bold red]Switch failed:[/bold red] {_format_switch_error(model_id, e)}"
+        )
         console.print(f"[dim]Keeping current model: {config.model_name}[/dim]")
         return
 
