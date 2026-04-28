@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 520" role="img" aria-labelledby="title desc">
+  <title id="title">ml-junior warm workbench banner</title>
+  <desc id="desc">A warm abstract ML workbench banner with subtle experiment, metric, and artifact motifs.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FAFAF8"/>
+      <stop offset=".62" stop-color="#F7F3EA"/>
+      <stop offset="1" stop-color="#E8E6E0"/>
+    </linearGradient>
+    <pattern id="grid" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M80 0H0v80" fill="none" stroke="#E6E4DF" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1600" height="520" fill="url(#bg)"/>
+  <rect width="1600" height="520" fill="url(#grid)" opacity=".55"/>
+  <g opacity=".9">
+    <rect x="112" y="96" width="312" height="132" rx="18" fill="#FAFAF8" stroke="#E6E4DF" stroke-width="2"/>
+    <path d="M142 182c42-42 70-28 102-40 34-13 49-61 84-49 34 11 45 70 76 75" fill="none" stroke="#3A72C8" stroke-width="5" stroke-linecap="round"/>
+    <rect x="142" y="126" width="80" height="12" rx="6" fill="#D4933A" opacity=".7"/>
+    <rect x="142" y="149" width="156" height="10" rx="5" fill="#E6E4DF"/>
+  </g>
+  <g opacity=".88">
+    <rect x="506" y="300" width="260" height="112" rx="18" fill="#141420"/>
+    <text x="538" y="350" fill="#D4933A" font-family="JetBrains Mono, monospace" font-size="24" font-weight="700">$</text>
+    <rect x="572" y="332" width="116" height="11" rx="5.5" fill="#FAFAF8" opacity=".85"/>
+    <rect x="538" y="372" width="176" height="9" rx="4.5" fill="#746F68"/>
+  </g>
+  <g opacity=".9">
+    <rect x="880" y="118" width="250" height="160" rx="20" fill="#FDF0DC" stroke="#E4C58E" stroke-width="2"/>
+    <path d="M932 208 1005 247l73-39v36l-73 44-73-44Z" fill="#141420"/>
+    <path d="M918 184 1005 228l87-44v30l-87 46-87-46Z" fill="#D4933A"/>
+    <path d="M896 155 1005 97l109 58-109 59Z" fill="#141420"/>
+    <g transform="matrix(1 .24 -.68 .45 1004 158)" fill="none" stroke="#D4933A" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-38-22-5 0-38 22"/>
+      <path d="M14 21h46"/>
+    </g>
+  </g>
+  <g opacity=".9">
+    <rect x="1240" y="318" width="244" height="78" rx="18" fill="#E6EEFA" stroke="#BCD0EE" stroke-width="2"/>
+    <circle cx="1290" cy="357" r="10" fill="#2F9B73"/>
+    <rect x="1318" y="346" width="116" height="10" rx="5" fill="#3A72C8" opacity=".72"/>
+    <rect x="1318" y="368" width="74" height="8" rx="4" fill="#746F68" opacity=".45"/>
+  </g>
+  <path d="M0 441c157-23 286-14 388 26 111 43 245 40 403-9 164-50 321-53 471-8 119 36 231 37 338 5v65H0Z" fill="#D4933A" opacity=".12"/>
+</svg>

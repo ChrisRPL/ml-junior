@@ -1,36 +1,32 @@
 import { useCallback, useRef, useEffect, useState } from 'react';
 import {
-  Avatar,
   Box,
   Drawer,
   Typography,
-  IconButton,
   Alert,
   AlertTitle,
   Snackbar,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import MenuIcon from '@mui/icons-material/Menu';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
-import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
-import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
 
 import { useSessionStore } from '@/store/sessionStore';
 import { useAgentStore } from '@/store/agentStore';
 import { useLayoutStore } from '@/store/layoutStore';
+import AppHeader, { type MainView } from '@/components/Layout/AppHeader';
 import SessionSidebar from '@/components/SessionSidebar/SessionSidebar';
 import SessionChat from '@/components/SessionChat';
 import CodePanel from '@/components/CodePanel/CodePanel';
 import WelcomeScreen from '@/components/WelcomeScreen/WelcomeScreen';
+import ProjectDashboard from '@/components/ProjectDashboard/ProjectDashboard';
 import { apiFetch } from '@/utils/api';
 
 const DRAWER_WIDTH = 260;
 
 export default function AppLayout() {
   const { sessions, activeSessionId, markExpired } = useSessionStore();
-  const { isConnected, llmHealthError, setLlmHealthError, user } = useAgentStore();
+  const { isConnected, llmHealthError, setLlmHealthError, user, activeProjectSnapshot, projectSnapshots } = useAgentStore();
   const {
     isLeftSidebarOpen,
     isRightPanelOpen,
@@ -46,7 +42,9 @@ export default function AppLayout() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   const [showExpiredToast, setShowExpiredToast] = useState(false);
+  const [mainView, setMainView] = useState<MainView>('dashboard');
   const disconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didAutoCloseMobileSidebar = useRef(false);
 
   const isResizing = useRef(false);
 
@@ -82,7 +80,17 @@ export default function AppLayout() {
     };
   }, [handleMouseMove, stopResizing]);
 
-  // -- LLM health check on mount -----------------------------------------
+  useEffect(() => {
+    if (!isMobile) {
+      didAutoCloseMobileSidebar.current = false;
+      return;
+    }
+    if (!didAutoCloseMobileSidebar.current) {
+      didAutoCloseMobileSidebar.current = true;
+      setLeftSidebarOpen(false);
+    }
+  }, [isMobile, setLeftSidebarOpen]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -106,8 +114,13 @@ export default function AppLayout() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasAnySessions = sessions.length > 0;
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  const dashboardSnapshot = activeSessionId
+    ? activeProjectSnapshot?.session_id === activeSessionId
+      ? activeProjectSnapshot
+      : projectSnapshots[activeSessionId] ?? null
+    : null;
 
-  // Debounced "session expired" toast
   useEffect(() => {
     if (!isConnected && activeSessionId) {
       disconnectTimer.current = setTimeout(() => setShowExpiredToast(true), 2000);
@@ -132,12 +145,10 @@ export default function AppLayout() {
     [markExpired],
   );
 
-  // Close sidebar on mobile after selecting a session
   const handleSidebarClose = useCallback(() => {
     if (isMobile) setLeftSidebarOpen(false);
   }, [isMobile, setLeftSidebarOpen]);
 
-  // -- LLM error toast helper --------------------------------------------
   const llmErrorTitle = llmHealthError
     ? llmHealthError.errorType === 'credits'
       ? 'API Credits Exhausted'
@@ -150,7 +161,6 @@ export default function AppLayout() {
       : 'LLM Error'
     : '';
 
-  // -- Welcome screen: no sessions at all ---------------------------------
   if (!hasAnySessions) {
     return (
       <Box sx={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -159,7 +169,6 @@ export default function AppLayout() {
     );
   }
 
-  // -- Sidebar drawer -----------------------------------------------------
   const sidebarDrawer = (
     <Drawer
       variant={isMobile ? 'temporary' : 'persistent'}
@@ -183,10 +192,8 @@ export default function AppLayout() {
     </Drawer>
   );
 
-  // -- Main chat interface ------------------------------------------------
   return (
     <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>
-      {/* -- Left Sidebar ------------------------------------------------- */}
       {isMobile ? (
         sidebarDrawer
       ) : (
@@ -203,7 +210,6 @@ export default function AppLayout() {
         </Box>
       )}
 
-      {/* -- Main Content (header + chat + code panel) -------------------- */}
       <Box
         sx={{
           flexGrow: 1,
@@ -215,76 +221,16 @@ export default function AppLayout() {
           minWidth: 0,
         }}
       >
-        {/* -- Top Header Bar --------------------------------------------- */}
-        <Box sx={{
-          height: { xs: 52, md: 60 },
-          px: { xs: 1, md: 2 },
-          display: 'flex',
-          alignItems: 'center',
-          borderBottom: 1,
-          borderColor: 'divider',
-          bgcolor: 'background.default',
-          zIndex: 1200,
-          flexShrink: 0,
-        }}>
-          <IconButton onClick={toggleLeftSidebar} size="small">
-            {isLeftSidebarOpen && !isMobile ? <ChevronLeftIcon /> : <MenuIcon />}
-          </IconButton>
-
-          <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.75 }}>
-            <Box
-              component="img"
-              src="/smolagents.webp"
-              alt="smolagents"
-              sx={{ width: { xs: 20, md: 22 }, height: { xs: 20, md: 22 } }}
-            />
-            <Typography
-              variant="subtitle1"
-              sx={{
-                fontWeight: 700,
-                color: 'var(--text)',
-                letterSpacing: '-0.01em',
-                fontSize: { xs: '0.88rem', md: '0.95rem' },
-              }}
-            >
-              ML Intern
-            </Typography>
-          </Box>
-
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <IconButton
-              onClick={toggleTheme}
-              size="small"
-              sx={{
-                color: 'text.secondary',
-                '&:hover': { color: 'primary.main' },
-              }}
-            >
-              {themeMode === 'dark' ? <LightModeOutlinedIcon fontSize="small" /> : <DarkModeOutlinedIcon fontSize="small" />}
-            </IconButton>
-
-            {user?.picture ? (
-              <Avatar
-                src={user.picture}
-                alt={user.username || 'User'}
-                sx={{ width: 28, height: 28, ml: 0.5 }}
-              />
-            ) : user?.username ? (
-              <Avatar
-                sx={{
-                  width: 28,
-                  height: 28,
-                  ml: 0.5,
-                  bgcolor: 'primary.main',
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                }}
-              >
-                {user.username[0].toUpperCase()}
-              </Avatar>
-            ) : null}
-          </Box>
-        </Box>
+        <AppHeader
+          isLeftSidebarOpen={isLeftSidebarOpen}
+          isMobile={isMobile}
+          mainView={mainView}
+          themeMode={themeMode}
+          user={user}
+          onMainViewChange={setMainView}
+          onToggleLeftSidebar={toggleLeftSidebar}
+          onToggleTheme={toggleTheme}
+        />
 
         {/* -- Chat + Code Panel ------------------------------------------ */}
         <Box
@@ -294,13 +240,13 @@ export default function AppLayout() {
             overflow: 'hidden',
           }}
         >
-          {/* Chat area */}
+          {/* Session hooks stay mounted while dashboard is visible. */}
           <Box
             component="main"
             className="chat-pane"
             sx={{
               flexGrow: 1,
-              display: 'flex',
+              display: mainView === 'chat' ? 'flex' : 'none',
               flexDirection: 'column',
               overflow: 'hidden',
               background: 'var(--body-gradient)',
@@ -339,6 +285,19 @@ export default function AppLayout() {
                 </Typography>
               </Box>
             )}
+          </Box>
+
+          <Box
+            component="main"
+            sx={{
+              flexGrow: 1,
+              display: mainView === 'dashboard' ? 'block' : 'none',
+              overflow: 'auto',
+              minWidth: 0,
+              background: '#E8E6E0',
+            }}
+          >
+            <ProjectDashboard snapshot={dashboardSnapshot} activeSession={activeSession} />
           </Box>
 
           {/* Code panel -- inline on desktop, overlay drawer on mobile */}

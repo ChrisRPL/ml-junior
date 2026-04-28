@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">ml-junior Terminal Cap mark</title>
+  <desc id="desc">A charcoal junior cap with an amber terminal prompt in perspective on the top plane.</desc>
+  <defs>
+    <linearGradient id="cap-top" x1="52" y1="50" x2="214" y2="148" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#20222A"/>
+      <stop offset="1" stop-color="#111219"/>
+    </linearGradient>
+    <linearGradient id="cap-band" x1="58" y1="124" x2="198" y2="174" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E2A13F"/>
+      <stop offset="1" stop-color="#C98024"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#141420" flood-opacity=".20"/>
+    </filter>
+  </defs>
+  <g filter="url(#soft-shadow)">
+    <path d="M69 143 128 174 187 143v31l-59 36-59-36Z" fill="#141420"/>
+    <path d="M57 122 128 158l71-36v24l-71 37-71-37Z" fill="url(#cap-band)"/>
+    <path d="M39 96c0-4 2-8 6-10l74-40c6-3 12-3 18 0l74 40c4 2 6 6 6 10v14c0 4-2 8-6 10l-74 40c-6 3-12 3-18 0l-74-40c-4-2-6-6-6-10Z" fill="url(#cap-top)"/>
+    <path d="M43 95 128 50l85 45" fill="none" stroke="#3A3A44" stroke-width="2" stroke-linecap="round" opacity=".75"/>
+    <g transform="matrix(1 .24 -.68 .45 126 96)" fill="none" stroke="#D4933A" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-34-20-4 0-34 20"/>
+      <path d="M12 19h42"/>
+    </g>
+    <path d="M199 119c9 8 14 18 14 30" fill="none" stroke="#141420" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="213" cy="151" r="6" fill="#141420"/>
+    <path d="M208 158h10l5 24h-20Z" fill="#141420"/>
+  </g>
+</svg>

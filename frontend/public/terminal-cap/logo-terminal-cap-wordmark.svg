@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 220" role="img" aria-labelledby="title desc">
+  <title id="title">ml-junior Terminal Cap wordmark</title>
+  <desc id="desc">The Terminal Cap mark next to the ml-junior wordmark.</desc>
+  <defs>
+    <linearGradient id="cap-top" x1="42" y1="45" x2="174" y2="126" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#20222A"/>
+      <stop offset="1" stop-color="#111219"/>
+    </linearGradient>
+    <linearGradient id="cap-band" x1="54" y1="108" x2="168" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E2A13F"/>
+      <stop offset="1" stop-color="#C98024"/>
+    </linearGradient>
+  </defs>
+  <rect width="720" height="220" rx="24" fill="#FAFAF8"/>
+  <g transform="translate(38 18)">
+    <path d="M53 115 102 141 151 115v26l-49 30-49-30Z" fill="#141420"/>
+    <path d="M43 98 102 128l59-30v20l-59 31-59-31Z" fill="url(#cap-band)"/>
+    <path d="M28 77c0-4 2-7 5-9l61-33c5-3 11-3 16 0l61 33c3 2 5 5 5 9v12c0 4-2 7-5 9l-61 33c-5 3-11 3-16 0L33 98c-3-2-5-5-5-9Z" fill="url(#cap-top)"/>
+    <path d="M31 76 102 39l71 37" fill="none" stroke="#3A3A44" stroke-width="1.7" stroke-linecap="round" opacity=".75"/>
+    <g transform="matrix(1 .24 -.68 .45 101 78)" fill="none" stroke="#D4933A" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-28-16-3 0-28 16"/>
+      <path d="M10 15h34"/>
+    </g>
+    <path d="M160 97c8 7 12 15 12 26" fill="none" stroke="#141420" stroke-width="4.2" stroke-linecap="round"/>
+    <circle cx="172" cy="125" r="5" fill="#141420"/>
+    <path d="M168 131h8l4 20h-16Z" fill="#141420"/>
+  </g>
+  <text x="242" y="123" fill="#141420" font-family="Space Grotesk, Avenir Next, sans-serif" font-size="72" font-weight="700" letter-spacing="0">ml<tspan fill="#D4933A">-</tspan>junior</text>
+</svg>

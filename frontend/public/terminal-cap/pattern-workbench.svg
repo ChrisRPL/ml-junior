@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 240" role="img" aria-labelledby="title desc">
+  <title id="title">Warm workbench pattern</title>
+  <desc id="desc">Repeatable warm pattern with subtle terminal cap, metric, and artifact shapes.</desc>
+  <rect width="360" height="240" fill="#FAFAF8"/>
+  <path d="M0 80h360M0 160h360M120 0v240M240 0v240" stroke="#E6E4DF" stroke-width="1" opacity=".7"/>
+  <path d="M28 184c28-26 45-12 64-26 20-15 20-52 43-44 22 8 24 54 47 58" fill="none" stroke="#3A72C8" stroke-width="3" stroke-linecap="round" opacity=".32"/>
+  <rect x="246" y="34" width="72" height="42" rx="10" fill="#FDF0DC" stroke="#E6E4DF"/>
+  <rect x="262" y="52" width="30" height="5" rx="2.5" fill="#D4933A" opacity=".8"/>
+  <g transform="translate(54 36) scale(.24)" opacity=".8">
+    <path d="M69 143 128 174 187 143v31l-59 36-59-36Z" fill="#141420"/>
+    <path d="M57 122 128 158l71-36v24l-71 37-71-37Z" fill="#D4933A"/>
+    <path d="M39 96c0-4 2-8 6-10l74-40c6-3 12-3 18 0l74 40c4 2 6 6 6 10v14c0 4-2 8-6 10l-74 40c-6 3-12 3-18 0l-74-40c-4-2-6-6-6-10Z" fill="#141420"/>
+    <g transform="matrix(1 .24 -.68 .45 126 96)" fill="none" stroke="#D4933A" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-34-20-4 0-34 20"/>
+      <path d="M12 19h42"/>
+    </g>
+  </g>
+</svg>
