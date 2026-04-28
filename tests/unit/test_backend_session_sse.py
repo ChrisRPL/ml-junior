@@ -12,7 +12,9 @@ from fastapi import HTTPException
 from litellm import Message
 
 import session_manager as session_module
+from agent.core.events import AgentEvent
 from agent.core.session import Event
+from backend.event_store import SQLiteEventStore
 import routes.agent as agent_routes
 from routes.agent import _sse_response
 
@@ -67,9 +69,25 @@ class FakeSession:
         self.is_running = True
         self.sandbox = None
         self._cancelled = False
+        self.session_id = "agent-internal-before-alignment"
+        self._next_event_sequence = 1
 
     async def send_event(self, event: Event) -> None:
-        await self.event_queue.put(event)
+        if isinstance(event, AgentEvent):
+            envelope = event.model_copy(
+                update={
+                    "session_id": self.session_id,
+                    "sequence": self._next_event_sequence,
+                }
+            )
+        else:
+            envelope = AgentEvent.from_legacy(
+                event,
+                session_id=self.session_id,
+                sequence=self._next_event_sequence,
+            )
+        self._next_event_sequence += 1
+        await self.event_queue.put(envelope.redacted_copy())
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -172,8 +190,10 @@ def _decode_sse_chunk(chunk: str | bytes) -> dict[str, Any]:
 
 
 @pytest.fixture
-def manager(test_config) -> session_module.SessionManager:
-    mgr = session_module.SessionManager()
+def manager(test_config, tmp_path) -> session_module.SessionManager:
+    mgr = session_module.SessionManager(
+        event_store=SQLiteEventStore(tmp_path / "events.sqlite")
+    )
     mgr.config = test_config
     return mgr
 
@@ -198,8 +218,11 @@ async def test_session_manager_create_list_delete_behavior(
     try:
         await _wait_until(lambda: manager.sessions[first].broadcaster is not None)
         await _wait_until(lambda: manager.sessions[second].broadcaster is not None)
+        await _wait_until(lambda: len(manager.event_store.replay(first)) == 1)
 
         assert manager.active_session_count == 2
+        assert manager.sessions[first].session.session_id == first
+        assert manager.event_store.replay(first)[0].session_id == first
         assert manager.sessions[first].session.hf_token == "hf_alice"
         assert manager.sessions[first].session.config.model_name == "test/alternate"
 
@@ -576,6 +599,53 @@ async def test_event_broadcaster_current_subscribers_only_transient_reconnect():
         assert first_queue.empty()
 
         broadcaster.unsubscribe(second_id)
+    finally:
+        task.cancel()
+        await task
+        assert task.done()
+
+
+async def test_event_broadcaster_persists_without_subscribers_and_terminal_events(
+    tmp_path,
+):
+    source = asyncio.Queue()
+    store = SQLiteEventStore(tmp_path / "events.sqlite")
+    broadcaster = session_module.EventBroadcaster(source, event_store=store)
+    task = asyncio.create_task(broadcaster.run())
+
+    try:
+        await source.put(
+            AgentEvent(
+                session_id="session-a",
+                sequence=1,
+                event_type="processing",
+                data={"message": "before subscriber"},
+            )
+        )
+        await _wait_until(lambda: len(store.replay("session-a")) == 1)
+
+        sub_id, subscriber = broadcaster.subscribe()
+        await source.put(
+            AgentEvent(
+                session_id="session-a",
+                sequence=2,
+                event_type="turn_complete",
+                data={"history_size": 3},
+            )
+        )
+
+        assert await _queue_get(subscriber) == {
+            "event_type": "turn_complete",
+            "data": {"history_size": 3},
+        }
+        assert [
+            (event.sequence, event.event_type)
+            for event in store.replay("session-a")
+        ] == [
+            (1, "processing"),
+            (2, "turn_complete"),
+        ]
+        broadcaster.unsubscribe(sub_id)
     finally:
         task.cancel()
         await task

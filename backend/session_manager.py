@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -10,12 +11,15 @@ from typing import Any, Optional
 
 from agent.config import load_config
 from agent.core.agent_loop import process_submission
+from agent.core.events import AgentEvent
 from agent.core.session import Event, OpType, Session
 from agent.core.tools import ToolRouter
+from backend.event_store import SQLiteEventStore
 
 # Get project root (parent of backend directory)
 PROJECT_ROOT = Path(__file__).parent.parent
 DEFAULT_CONFIG_PATH = str(PROJECT_ROOT / "configs" / "main_agent_config.json")
+DEFAULT_EVENT_STORE_PATH = PROJECT_ROOT / "session_logs" / "events.sqlite3"
 
 
 # These dataclasses match agent/main.py structure
@@ -62,15 +66,15 @@ def event_to_legacy_dict(event: Any) -> dict[str, Any]:
 
 
 class EventBroadcaster:
-    """Reads from the agent's event queue and fans out to SSE subscribers.
+    """Reads from the agent's event queue, persists envelopes, and fans out."""
 
-    Events that arrive when no subscribers are listening are discarded.
-    With SSE each turn is a separate request, so there is no reconnect
-    scenario that would need buffered replay.
-    """
-
-    def __init__(self, event_queue: asyncio.Queue):
+    def __init__(
+        self,
+        event_queue: asyncio.Queue,
+        event_store: SQLiteEventStore | None = None,
+    ):
         self._source = event_queue
+        self._event_store = event_store
         self._subscribers: dict[int, asyncio.Queue] = {}
         self._counter = 0
 
@@ -90,6 +94,8 @@ class EventBroadcaster:
         while True:
             try:
                 event = await self._source.get()
+                if self._event_store is not None and isinstance(event, AgentEvent):
+                    event = self._event_store.append(event)
                 msg = event_to_legacy_dict(event)
                 for q in self._subscribers.values():
                     await q.put(msg)
@@ -140,10 +146,27 @@ MAX_SESSIONS_PER_USER: int = 10
 class SessionManager:
     """Manages multiple concurrent agent sessions."""
 
-    def __init__(self, config_path: str | None = None) -> None:
+    def __init__(
+        self,
+        config_path: str | None = None,
+        event_store: SQLiteEventStore | None = None,
+        event_store_path: str | Path | None = None,
+    ) -> None:
         self.config = load_config(config_path or DEFAULT_CONFIG_PATH)
+        self._event_store = event_store
+        self._event_store_path = (
+            event_store_path
+            or os.environ.get("MLJ_EVENT_STORE_PATH")
+            or DEFAULT_EVENT_STORE_PATH
+        )
         self.sessions: dict[str, AgentSession] = {}
         self._lock = asyncio.Lock()
+
+    @property
+    def event_store(self) -> SQLiteEventStore:
+        if self._event_store is None:
+            self._event_store = SQLiteEventStore(self._event_store_path)
+        return self._event_store
 
     def _count_user_sessions(self, user_id: str) -> int:
         """Count active sessions owned by a specific user."""
@@ -226,6 +249,7 @@ class SessionManager:
             return tool_router, session
 
         tool_router, session = await asyncio.to_thread(_create_session_sync)
+        session.session_id = session_id
 
         # Create wrapper
         agent_session = AgentSession(
@@ -339,7 +363,7 @@ class SessionManager:
         session = agent_session.session
 
         # Start event broadcaster task
-        broadcaster = EventBroadcaster(event_queue)
+        broadcaster = EventBroadcaster(event_queue, event_store=self.event_store)
         agent_session.broadcaster = broadcaster
         broadcast_task = asyncio.create_task(broadcaster.run())
 
