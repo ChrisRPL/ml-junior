@@ -74,7 +74,7 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
         />
         <EmptyProject
           title="Session-only project"
-          detail="No durable project snapshot has hydrated yet. Chat can still run; dashboard rows will appear from replayable events."
+          detail="Project rows will appear when session events are available."
         />
       </DashboardFrame>
     );
@@ -104,7 +104,7 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
           sx={alertSx}
         >
           <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
-            {stale ? 'Snapshot needs hydration' : 'Compatibility notes'}
+            {stale ? 'Project state is stale' : 'Project notes'}
           </Typography>
           <Typography variant="caption" sx={{ color: 'var(--muted-text)' }}>
             {[...new Set(warnings.concat(stale ? ['stale_snapshot'] : []))].join(', ')}
@@ -115,101 +115,105 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
       <Box sx={overviewGridSx}>
         <Metric title="Current phase" value={snapshot.phase.label} detail={humanize(snapshot.phase.status)} tone={phaseTone(snapshot.phase.status)} />
         <Metric title="Approvals" value={snapshot.pending_approvals.length} detail={snapshot.status === 'waiting_approval' ? 'blocked' : 'pending'} tone={snapshot.pending_approvals.length > 0 ? 'amber' : 'muted'} />
-        <Metric title="Active jobs/tools" value={snapshot.active_jobs.length + runningOperations(snapshot.operation_refs).length} detail="live refs" tone={snapshot.active_jobs.length > 0 ? 'blue' : 'muted'} />
+        <Metric title="Active jobs/tools" value={snapshot.active_jobs.length + runningOperations(snapshot.operation_refs).length} detail="running" tone={snapshot.active_jobs.length > 0 ? 'blue' : 'muted'} />
         <Metric title="Resume" value={snapshot.resume.can_resume ? 'ready' : 'not yet'} detail={`seq ${snapshot.resume.event_sequence}`} tone={snapshot.resume.can_resume ? 'good' : 'muted'} mono />
       </Box>
 
       <Box sx={dashboardGridSx}>
-        <Panel title="Plan" icon={<PendingActionsOutlinedIcon />}>
-          {snapshot.plan.length > 0 ? (
-            <Stack spacing={1}>
-              {snapshot.plan.map((item) => <PlanRow key={item.id} item={item} />)}
-            </Stack>
-          ) : (
-            <Placeholder text="Plan placeholder. Waiting for workflow or plan events." />
-          )}
-        </Panel>
-
-        <Panel title="Blockers and waits" icon={<ErrorOutlineIcon />}>
-          <Stack spacing={1}>
-            {snapshot.blockers.length > 0
-              ? snapshot.blockers.map((blocker) => <BlockerRow key={blocker.id} blocker={blocker} />)
-              : <Placeholder text="No active blockers." />}
-            {snapshot.human_requests.length > 0
-              ? snapshot.human_requests.map((request) => <HumanWaitRow key={request.request_id} request={request} />)
-              : <Placeholder text="No human waits queued." compact />}
-          </Stack>
-        </Panel>
-
-        <Panel title="Pending approvals" icon={<FactCheckOutlinedIcon />}>
-          {snapshot.pending_approvals.length > 0 ? (
-            <Stack spacing={1}>
-              {snapshot.pending_approvals.map((approval) => <ApprovalRow key={approval.tool_call_id} approval={approval} />)}
-            </Stack>
-          ) : (
-            <Placeholder text="No approvals pending." />
-          )}
-        </Panel>
-
-        <Panel title="Jobs and tools" icon={<MemoryOutlinedIcon />}>
-          <Stack spacing={1}>
-            {snapshot.active_jobs.length > 0
-              ? snapshot.active_jobs.map((job) => <JobRow key={`${job.tool_call_id}:${job.job_id ?? job.status}`} job={job} />)
-              : <Placeholder text="No active HF jobs or streamable tools." />}
-            {snapshot.operation_refs.length > 0
-              ? snapshot.operation_refs.slice(0, 5).map((operation) => <OperationRow key={operation.id} operation={operation} />)
-              : <Placeholder text="Operation refs will appear as tools and approvals run." compact />}
-          </Stack>
-        </Panel>
-
-        <Panel title="Evidence and artifacts" icon={<TaskAltOutlinedIcon />}>
-          <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
-            <Box component="img" src={terminalAssets.evidence} alt="" sx={{ width: 84, display: { xs: 'none', sm: 'block' } }} />
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, mb: 1 }}>
-                <ToneChip label={`${snapshot.evidence_summary.artifact_count} artifacts`} tone="blue" />
-                <ToneChip label={`${snapshot.evidence_summary.metric_count} metrics`} tone="good" />
-                <ToneChip label={`${snapshot.evidence_summary.claim_count} claims`} tone={verifierTone} />
+        <Stack spacing={1.5}>
+          <Panel title="Plan" icon={<PendingActionsOutlinedIcon />}>
+            {snapshot.plan.length > 0 ? (
+              <Stack spacing={0}>
+                {snapshot.plan.map((item) => <PlanRow key={item.id} item={item} />)}
               </Stack>
-              <Typography variant="body2" sx={{ color: 'var(--muted-text)' }}>
-                Verifier state: {humanize(snapshot.evidence_summary.status)}.
-              </Typography>
-            </Box>
-          </Box>
-          <Divider sx={{ my: 1.5 }} />
-          {snapshot.evidence_summary.items.length > 0
-            ? snapshot.evidence_summary.items.slice(0, 4).map((item, index) => (
-                <Typography key={index} variant="caption" sx={monoLineSx}>
-                  {formatUnknown(item)}
+            ) : (
+              <Placeholder text="Waiting for plan events." />
+            )}
+          </Panel>
+
+          <Panel title="Blockers and waits" icon={<ErrorOutlineIcon />}>
+            <Stack spacing={0}>
+              {snapshot.blockers.length > 0
+                ? snapshot.blockers.map((blocker) => <BlockerRow key={blocker.id} blocker={blocker} />)
+                : <Placeholder text="No active blockers." />}
+              {snapshot.human_requests.length > 0
+                ? snapshot.human_requests.map((request) => <HumanWaitRow key={request.request_id} request={request} />)
+                : <Placeholder text="No human waits." compact />}
+            </Stack>
+          </Panel>
+
+          <Panel title="Jobs and tools" icon={<MemoryOutlinedIcon />}>
+            <Stack spacing={0}>
+              {snapshot.active_jobs.length > 0
+                ? snapshot.active_jobs.map((job) => <JobRow key={`${job.tool_call_id}:${job.job_id ?? job.status}`} job={job} />)
+                : <Placeholder text="No active jobs." />}
+              {snapshot.operation_refs.length > 0
+                ? snapshot.operation_refs.slice(0, 5).map((operation) => <OperationRow key={operation.id} operation={operation} />)
+                : <Placeholder text="No recent tools." compact />}
+            </Stack>
+          </Panel>
+        </Stack>
+
+        <Stack spacing={1.5}>
+          <Panel title="Pending approvals" icon={<FactCheckOutlinedIcon />}>
+            {snapshot.pending_approvals.length > 0 ? (
+              <Stack spacing={0}>
+                {snapshot.pending_approvals.map((approval) => <ApprovalRow key={approval.tool_call_id} approval={approval} />)}
+              </Stack>
+            ) : (
+              <Placeholder text="No approvals pending." />
+            )}
+          </Panel>
+
+          <Panel title="Evidence and artifacts" icon={<TaskAltOutlinedIcon />}>
+            <Box sx={{ display: 'flex', gap: 1.25, alignItems: 'center' }}>
+              <Box component="img" src={terminalAssets.evidence} alt="" sx={{ width: 58, display: { xs: 'none', sm: 'block' }, opacity: 0.82 }} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', rowGap: 0.75, mb: 0.75 }}>
+                  <ToneChip label={`${snapshot.evidence_summary.artifact_count} artifacts`} tone="blue" />
+                  <ToneChip label={`${snapshot.evidence_summary.metric_count} metrics`} tone="good" />
+                  <ToneChip label={`${snapshot.evidence_summary.claim_count} claims`} tone={verifierTone} />
+                </Stack>
+                <Typography variant="body2" sx={{ color: 'var(--muted-text)' }}>
+                  Verifier: {humanize(snapshot.evidence_summary.status)}.
                 </Typography>
-              ))
-            : <Placeholder text="Recent artifacts and evidence ledger are placeholders until producers land." compact />}
-        </Panel>
+              </Box>
+            </Box>
+            <Divider sx={{ my: 1.25 }} />
+            {snapshot.evidence_summary.items.length > 0
+              ? snapshot.evidence_summary.items.slice(0, 4).map((item, index) => (
+                  <Typography key={index} variant="caption" sx={monoLineSx}>
+                    {formatUnknown(item)}
+                  </Typography>
+                ))
+              : <Placeholder text="No evidence yet." compact />}
+          </Panel>
 
-        <Panel title="Budget and tracking" icon={<PlayArrowOutlinedIcon />}>
-          <Stack spacing={1}>
-            <StatusLine label="Budget" value={formatBudget(snapshot)} tone={snapshot.budget.status === 'exhausted' ? 'risk' : 'muted'} />
-            <StatusLine label="Source" value={humanize(snapshot.budget.source)} tone="muted" />
-            {snapshot.live_tracking_refs.map((ref, index) => (
-              <StatusLine
-                key={ref.id ?? `${ref.provider}:${index}`}
-                label={ref.provider}
-                value={ref.enabled ? humanize(ref.status) : 'placeholder'}
-                tone={ref.enabled ? 'blue' : 'muted'}
-              />
-            ))}
-            <StatusLine label="Missing producers" value={snapshot.compatibility.missing_producers.join(', ') || 'none'} tone="muted" />
-          </Stack>
-        </Panel>
+          <Panel title="Budget and tracking" icon={<PlayArrowOutlinedIcon />}>
+            <Stack spacing={0.75}>
+              <StatusLine label="Budget" value={formatBudget(snapshot)} tone={snapshot.budget.status === 'exhausted' ? 'risk' : 'muted'} />
+              <StatusLine label="Source" value={formatSource(snapshot.budget.source)} tone="muted" />
+              {snapshot.live_tracking_refs.map((ref, index) => (
+                <StatusLine
+                  key={ref.id ?? `${ref.provider}:${index}`}
+                  label={ref.provider}
+                  value={ref.enabled ? humanize(ref.status) : 'not active'}
+                  tone={ref.enabled ? 'blue' : 'muted'}
+                />
+              ))}
+              <StatusLine label="Coverage" value={snapshot.compatibility.missing_producers.length > 0 ? 'partial' : 'complete'} tone="muted" />
+            </Stack>
+          </Panel>
 
-        <Panel title="Resume state" icon={<HourglassBottomOutlinedIcon />}>
-          <Stack spacing={1}>
-            <StatusLine label="Can resume" value={snapshot.resume.can_resume ? 'yes' : 'no'} tone={snapshot.resume.can_resume ? 'good' : 'muted'} />
-            <StatusLine label="Reason" value={humanize(snapshot.resume.reason)} tone="muted" />
-            <StatusLine label="Restored" value={snapshot.resume.restored_from_snapshot ? 'from durable snapshot' : 'live/session projection'} tone="blue" />
-            <StatusLine label="Last durable event" value={snapshot.resume.last_durable_event_id ?? 'none'} tone="muted" mono />
-          </Stack>
-        </Panel>
+          <Panel title="Resume state" icon={<HourglassBottomOutlinedIcon />}>
+            <Stack spacing={0.75}>
+              <StatusLine label="Resume" value={snapshot.resume.can_resume ? 'ready' : 'not available'} tone={snapshot.resume.can_resume ? 'good' : 'muted'} />
+              <StatusLine label="Reason" value={humanize(snapshot.resume.reason)} tone="muted" />
+              <StatusLine label="Restored" value={snapshot.resume.restored_from_snapshot ? 'durable' : 'live'} tone="blue" />
+              <StatusLine label="Last event" value={snapshot.resume.last_durable_event_id ?? 'none'} tone="muted" mono />
+            </Stack>
+          </Panel>
+        </Stack>
       </Box>
     </DashboardFrame>
   );
@@ -221,10 +225,8 @@ function DashboardFrame({ children }: { children: ReactNode }) {
       sx={{
         minHeight: '100%',
         p: { xs: 1.25, sm: 2, lg: 3 },
-        bgcolor: '#E8E6E0',
-        backgroundImage: `url(${terminalAssets.pattern})`,
-        backgroundSize: '420px auto',
-        color: '#141420',
+        bgcolor: 'var(--bg)',
+        color: 'var(--text)',
       }}
     >
       <Box sx={{ maxWidth: 1440, mx: 'auto' }}>{children}</Box>
@@ -236,9 +238,9 @@ function Header({ status, title, subtitle, updatedAt }: { status: string; title:
   return (
     <Box sx={headerSx}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-        <Box component="img" src={terminalAssets.mark} alt="" sx={{ width: 42, height: 42, flexShrink: 0 }} />
+        <Box component="img" src={terminalAssets.mark} alt="" sx={{ width: 34, height: 34, flexShrink: 0 }} />
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="overline" sx={eyebrowSx}>Project dashboard</Typography>
+          <Typography variant="caption" sx={eyebrowSx}>Project dashboard</Typography>
           <Typography variant="h4" sx={titleSx}>{title}</Typography>
           <Typography variant="body2" sx={{ color: 'var(--muted-text)', fontFamily: '"JetBrains Mono", monospace' }}>
             {subtitle}
@@ -256,9 +258,9 @@ function Header({ status, title, subtitle, updatedAt }: { status: string; title:
 function EmptyProject({ title, detail }: { title: string; detail: string }) {
   return (
     <Box sx={emptySx}>
-      <Box component="img" src={terminalAssets.experiment} alt="" sx={{ width: { xs: 132, sm: 170 } }} />
+      <Box component="img" src={terminalAssets.experiment} alt="" sx={{ width: { xs: 96, sm: 118 }, opacity: 0.86 }} />
       <Box>
-        <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>{title}</Typography>
+        <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>{title}</Typography>
         <Typography variant="body2" sx={{ color: 'var(--muted-text)', maxWidth: 540 }}>{detail}</Typography>
       </Box>
     </Box>
@@ -269,8 +271,8 @@ function Panel({ title, icon, children }: { title: string; icon: ReactNode; chil
   return (
     <Box sx={panelSx}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-        <Box sx={{ color: '#D4933A', display: 'flex', '& svg': { fontSize: 19 } }}>{icon}</Box>
-        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{title}</Typography>
+        <Box sx={{ color: 'text.secondary', display: 'flex', '& svg': { fontSize: 18 } }}>{icon}</Box>
+        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{title}</Typography>
       </Box>
       {children}
     </Box>
@@ -281,7 +283,7 @@ function Metric({ title, value, detail, tone, mono }: { title: string; value: Re
   return (
     <Box sx={metricSx}>
       <Typography variant="caption" sx={labelSx}>{title}</Typography>
-      <Typography sx={{ fontSize: '1.35rem', fontWeight: 800, fontFamily: mono ? '"JetBrains Mono", monospace' : undefined }}>
+      <Typography sx={{ fontSize: '1.22rem', fontWeight: 700, lineHeight: 1.15, fontFamily: mono ? '"JetBrains Mono", monospace' : undefined }}>
         {value}
       </Typography>
       <ToneChip label={detail} tone={tone} />
@@ -325,7 +327,7 @@ function Row({ title, meta, tone, id, mono }: { title: string; meta: ReactNode; 
   return (
     <Box sx={rowSx}>
       <Box sx={{ minWidth: 0 }}>
-        <Typography variant="body2" sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}>{title}</Typography>
+        <Typography variant="body2" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{title}</Typography>
         {id && <Typography variant="caption" sx={monoLineSx}>{shortId(id)}</Typography>}
       </Box>
       <ToneChip label={meta} tone={tone} mono={mono} />
@@ -360,9 +362,10 @@ function ToneChip({ label, tone, mono }: { label: ReactNode; tone: Tone; mono?: 
         bgcolor: toneBg(tone),
         color: toneFg(tone),
         border: `1px solid ${toneBorder(tone)}`,
-        fontWeight: 800,
+        fontWeight: 600,
         fontSize: '0.72rem',
         fontFamily: mono ? '"JetBrains Mono", monospace' : undefined,
+        minWidth: 0,
         maxWidth: '100%',
         '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
       }}
@@ -388,10 +391,14 @@ function formatDate(value: string) {
 
 function formatBudget(snapshot: ProjectSnapshot) {
   const { budget } = snapshot;
-  if (budget.status === 'placeholder') return 'placeholder';
+  if (budget.status === 'placeholder') return 'not tracked';
   if (budget.limit === null && budget.used === null) return humanize(budget.status);
   const currency = budget.currency ?? 'units';
   return `${budget.used ?? 0}/${budget.limit ?? '?'} ${currency}`;
+}
+
+function formatSource(source: string) {
+  return source === 'placeholder' ? 'not tracked' : humanize(source);
 }
 
 function formatUnknown(value: unknown): string {

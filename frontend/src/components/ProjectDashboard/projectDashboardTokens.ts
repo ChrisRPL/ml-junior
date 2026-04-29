@@ -2,7 +2,6 @@ export type Tone = 'amber' | 'blue' | 'good' | 'risk' | 'muted';
 
 export const terminalAssets = {
   mark: '/terminal-cap/logo-terminal-cap-mark.svg',
-  pattern: '/terminal-cap/pattern-workbench.svg',
   evidence: '/terminal-cap/empty-state-evidence.svg',
   experiment: '/terminal-cap/empty-state-experiment.svg',
 };
@@ -37,10 +36,10 @@ export function toneBorder(tone: Tone) {
 
 export const headerSx = {
   mb: 2,
-  p: { xs: 1.5, sm: 2 },
-  border: '1px solid #DCD7CE',
+  p: { xs: 1.5, sm: 2, md: 2.25 },
+  border: '1px solid var(--border)',
   borderRadius: '8px',
-  bgcolor: 'rgba(250, 250, 248, 0.92)',
+  bgcolor: 'var(--panel)',
   display: 'flex',
   gap: 2,
   justifyContent: 'space-between',
@@ -59,22 +58,22 @@ export const alertSx = {
 export const overviewGridSx = {
   display: 'grid',
   gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' },
-  gap: 1.5,
-  mb: 1.5,
+  gap: 1,
+  mb: 2,
 };
 
 export const dashboardGridSx = {
   display: 'grid',
-  gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(3, minmax(0, 1fr))' },
+  gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(320px, 0.85fr)' },
   gap: 1.5,
   alignItems: 'start',
 };
 
 export const panelSx = {
-  border: '1px solid #DCD7CE',
+  border: '1px solid var(--border)',
   borderRadius: '8px',
-  bgcolor: 'rgba(250, 250, 248, 0.94)',
-  p: { xs: 1.5, sm: 2 },
+  bgcolor: 'var(--panel)',
+  p: { xs: 1.25, sm: 1.5 },
   minWidth: 0,
 };
 
@@ -82,33 +81,39 @@ export const metricSx = {
   ...panelSx,
   display: 'flex',
   flexDirection: 'column',
-  gap: 0.75,
+  gap: 0.6,
+  minHeight: 104,
 };
 
 export const rowSx = {
   display: 'grid',
-  gridTemplateColumns: 'minmax(0, 1fr) auto',
+  gridTemplateColumns: 'minmax(0, 1fr) minmax(0, auto)',
   gap: 1,
   alignItems: 'center',
-  border: '1px solid #E6E4DF',
-  borderRadius: '6px',
-  p: 1,
-  bgcolor: '#FFFFFF',
+  minHeight: 44,
+  py: 0.75,
+  px: 0.25,
+  borderBottom: '1px solid var(--border)',
+  '&:last-of-type': { borderBottom: 0 },
 };
 
 export const statusLineSx = {
-  display: 'flex',
+  display: 'grid',
+  gridTemplateColumns: 'minmax(96px, 0.8fr) minmax(0, 1.2fr)',
   gap: 1,
   alignItems: 'center',
-  justifyContent: 'space-between',
   minWidth: 0,
+  minHeight: 34,
+  '& .MuiChip-root': {
+    justifySelf: 'end',
+  },
 };
 
 export const emptySx = {
-  minHeight: 360,
-  border: '1px solid #DCD7CE',
+  minHeight: 260,
+  border: '1px solid var(--border)',
   borderRadius: '8px',
-  bgcolor: 'rgba(250, 250, 248, 0.94)',
+  bgcolor: 'var(--panel)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -120,23 +125,22 @@ export const emptySx = {
 
 export const eyebrowSx = {
   color: '#8A581B',
-  fontWeight: 900,
-  letterSpacing: '0.08em',
+  fontWeight: 600,
+  letterSpacing: 0,
   lineHeight: 1,
 };
 
 export const titleSx = {
-  fontWeight: 900,
-  fontSize: { xs: '1.45rem', sm: '2rem' },
-  lineHeight: 1.05,
+  fontWeight: 700,
+  fontSize: { xs: '1.25rem', sm: '1.65rem' },
+  lineHeight: 1.14,
   overflowWrap: 'anywhere',
 };
 
 export const labelSx = {
   color: 'var(--muted-text)',
-  fontWeight: 800,
-  textTransform: 'uppercase',
-  letterSpacing: '0.08em',
+  fontWeight: 600,
+  letterSpacing: 0,
 };
 
 export const monoLineSx = {

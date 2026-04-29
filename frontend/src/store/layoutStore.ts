@@ -22,7 +22,7 @@ export const useLayoutStore = create<LayoutStore>()(
       isLeftSidebarOpen: true,
       isRightPanelOpen: false,
       rightPanelWidth: 450,
-      themeMode: 'dark' as ThemeMode,
+      themeMode: 'light' as ThemeMode,
       setLeftSidebarOpen: (open) => set({ isLeftSidebarOpen: open }),
       setRightPanelOpen: (open) => set({ isRightPanelOpen: open }),
       setRightPanelWidth: (width) => set({ rightPanelWidth: width }),
@@ -34,7 +34,7 @@ export const useLayoutStore = create<LayoutStore>()(
         })),
     }),
     {
-      name: 'hf-agent-layout',
+      name: 'ml-junior-layout',
       partialize: (state) => ({ themeMode: state.themeMode }),
     }
   )

@@ -17,7 +17,8 @@ import { apiFetch } from '@/utils/api';
 import { isInIframe, triggerLogin } from '@/hooks/useAuth';
 import { useOrgMembership } from '@/hooks/useOrgMembership';
 
-const HF_ORANGE = '#FF9D00';
+const BRAND_AMBER = '#D4933A';
+const BRAND_AMBER_HOVER = '#E2A13F';
 const ORG_JOIN_URL =
   'https://huggingface.co/organizations/ml-agent-explorers/share/GzPMJUivoFPlfkvFtIqEouZKSytatKQSZT';
 
@@ -57,7 +58,7 @@ function StepIndicator({ status, stepNumber }: { status: StepStatus; stepNumber:
         fontSize: '0.8rem',
         fontWeight: 700,
         ...(status === 'active'
-          ? { bgcolor: HF_ORANGE, color: '#000' }
+          ? { bgcolor: BRAND_AMBER, color: '#141420' }
           : { bgcolor: 'transparent', border: '2px solid var(--border)', color: 'var(--muted-text)' }),
       }}
     >
@@ -83,22 +84,22 @@ function ChecklistStep({
     px: 3,
     py: 0.75,
     fontSize: '0.85rem',
-    fontWeight: 700,
+    fontWeight: 600,
     textTransform: 'none' as const,
-    borderRadius: '10px',
+    borderRadius: '8px',
     whiteSpace: 'nowrap' as const,
     textDecoration: 'none',
     ...(status === 'active'
       ? {
-          bgcolor: HF_ORANGE,
-          color: '#000',
-          boxShadow: '0 2px 12px rgba(255, 157, 0, 0.25)',
-          '&:hover': { bgcolor: '#FFB340', boxShadow: '0 4px 20px rgba(255, 157, 0, 0.4)' },
+          bgcolor: BRAND_AMBER,
+          color: '#141420',
+          boxShadow: 'none',
+          '&:hover': { bgcolor: BRAND_AMBER_HOVER },
         }
       : {
-          bgcolor: 'rgba(255,255,255,0.04)',
+          bgcolor: 'var(--surface)',
           color: 'var(--muted-text)',
-          '&.Mui-disabled': { bgcolor: 'rgba(255,255,255,0.04)', color: 'var(--muted-text)' },
+          '&.Mui-disabled': { bgcolor: 'var(--surface)', color: 'var(--muted-text)' },
         }),
   };
 
@@ -115,7 +116,7 @@ function ChecklistStep({
           status === 'completed'
             ? 'var(--accent-green)'
             : status === 'active'
-              ? HF_ORANGE
+              ? BRAND_AMBER
               : 'transparent',
         ...(!isLast && { borderBottom: '1px solid var(--border)' }),
         opacity: status === 'locked' ? 0.55 : 1,
@@ -271,12 +272,12 @@ export default function WelcomeScreen() {
   const joinOrgStatus: StepStatus = isOrgMember ? 'completed' : isAuthenticated ? 'active' : 'locked';
   const startStatus: StepStatus = isAuthenticated && isOrgMember ? 'active' : 'locked';
 
-  // Space URL for iframe "Open ML Intern" step
+  // Space URL for iframe open step.
   const spaceHost =
     typeof window !== 'undefined'
       ? window.location.hostname.includes('.hf.space')
         ? window.location.origin
-        : 'https://smolagents-ml-intern.hf.space'
+        : 'https://ml-junior.hf.space'
       : '';
 
   return (
@@ -288,69 +289,66 @@ export default function WelcomeScreen() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'var(--body-gradient)',
-        py: 8,
+        background: 'var(--bg)',
+        py: { xs: 4, md: 7 },
+        px: 2,
       }}
     >
-      {/* Logo */}
       <Box
         component="img"
-        src="/smolagents.webp"
-        alt="smolagents"
-        sx={{ width: 80, height: 80, mb: 2.5, display: 'block' }}
+        src="/terminal-cap/logo-terminal-cap-mark.svg"
+        alt="ml-junior"
+        sx={{ width: 64, height: 64, mb: 2, display: 'block' }}
       />
 
-      {/* Title */}
       <Typography
         variant="h2"
         sx={{
-          fontWeight: 800,
+          fontWeight: 700,
           color: 'var(--text)',
           mb: 1,
-          letterSpacing: '-0.02em',
-          fontSize: { xs: '1.8rem', md: '2.4rem' },
+          letterSpacing: 0,
+          fontSize: { xs: '1.9rem', md: '2.45rem' },
+          lineHeight: 1.1,
         }}
       >
-        ML Intern
+        ml-junior
       </Typography>
 
-      {/* Description */}
       <Typography
         variant="body1"
         sx={{
           color: 'var(--muted-text)',
-          maxWidth: 480,
-          mb: 4,
-          lineHeight: 1.7,
-          fontSize: '0.9rem',
+          maxWidth: 440,
+          mb: 3,
+          lineHeight: 1.55,
+          fontSize: '0.94rem',
           textAlign: 'center',
-          px: 2,
           '& strong': { color: 'var(--text)', fontWeight: 600 },
         }}
       >
-        Your personal <strong>ML agent</strong>. It reads <strong>papers</strong>, finds <strong>datasets</strong>, trains <strong>models</strong>, and iterates until the numbers go up. Instructions in. Trained model out.
+        A project workbench for papers, datasets, runs, and evidence.
       </Typography>
 
       {/* ── Checklist ──────────────────────────────────────────── */}
       <Box
         sx={{
           width: '100%',
-          maxWidth: 520,
-          bgcolor: 'var(--surface)',
+          maxWidth: 560,
+          bgcolor: 'var(--panel)',
           border: '1px solid var(--border)',
-          borderRadius: '12px',
+          borderRadius: '8px',
           overflow: 'hidden',
-          mx: 2,
         }}
       >
         {isDevUser ? (
           /* Dev mode: single step */
           <ChecklistStep
             stepNumber={1}
-            title="Start Session"
-            description="Launch an AI agent session for ML engineering."
+            title="Start session"
+            description="Create a project session."
             status="active"
-            actionLabel="Start Session"
+            actionLabel="Start session"
             actionIcon={<RocketLaunchIcon sx={{ fontSize: 16 }} />}
             onAction={handleStartSession}
             loading={isCreating}
@@ -362,19 +360,19 @@ export default function WelcomeScreen() {
             <ChecklistStep
               stepNumber={1}
               title="Join ML Agent Explorers"
-              description="Get free access to GPUs, inference APIs, and Hub resources."
+              description="Access shared ML resources."
               status={isOrgMember ? 'completed' : 'active'}
-              actionLabel="Join Organization"
+              actionLabel="Join organization"
               actionIcon={<GroupAddIcon sx={{ fontSize: 16 }} />}
               onAction={handleJoinOrg}
             />
             <ChecklistStep
               stepNumber={2}
-              title="Open ML Intern"
-              description="Open the agent in a full browser tab to get started."
+              title="Open ml-junior"
+              description="Continue in a full browser tab."
               status={isOrgMember ? 'active' : 'locked'}
               lockedReason="Join the organization first."
-              actionLabel="Open ML Intern"
+              actionLabel="Open ml-junior"
               actionIcon={<OpenInNewIcon sx={{ fontSize: 16 }} />}
               actionHref={spaceHost}
               isLast
@@ -386,7 +384,7 @@ export default function WelcomeScreen() {
             <ChecklistStep
               stepNumber={1}
               title="Sign in with Hugging Face"
-              description="Authenticate to access GPU resources and model APIs."
+              description="Use your Hugging Face account."
               status={signInStatus}
               actionLabel="Sign in"
               actionIcon={<LoginIcon sx={{ fontSize: 16 }} />}
@@ -395,20 +393,20 @@ export default function WelcomeScreen() {
             <ChecklistStep
               stepNumber={2}
               title="Join ML Agent Explorers"
-              description="Get free access to GPUs, inference APIs, and Hub resources."
+              description="Access shared ML resources."
               status={joinOrgStatus}
               lockedReason="Sign in first to continue."
-              actionLabel="Join Organization"
+              actionLabel="Join organization"
               actionIcon={<GroupAddIcon sx={{ fontSize: 16 }} />}
               onAction={handleJoinOrg}
             />
             <ChecklistStep
               stepNumber={3}
-              title="Start Session"
-              description="Launch an AI agent session for ML engineering."
+              title="Start session"
+              description="Create a project session."
               status={startStatus}
               lockedReason="Complete the steps above to continue."
-              actionLabel="Start Session"
+              actionLabel="Start session"
               actionIcon={<RocketLaunchIcon sx={{ fontSize: 16 }} />}
               onAction={handleStartSession}
               loading={isCreating}
@@ -438,7 +436,7 @@ export default function WelcomeScreen() {
             mt: 3,
             maxWidth: 400,
             fontSize: '0.8rem',
-            borderColor: HF_ORANGE,
+            borderColor: BRAND_AMBER,
             color: 'var(--text)',
           }}
         >

@@ -18,6 +18,7 @@ import type { ThemeMode } from '@/store/layoutStore';
 export type MainView = 'dashboard' | 'chat';
 
 interface AppHeaderProps {
+  activeTitle?: string | null;
   isLeftSidebarOpen: boolean;
   isMobile: boolean;
   mainView: MainView;
@@ -29,6 +30,7 @@ interface AppHeaderProps {
 }
 
 export default function AppHeader({
+  activeTitle,
   isLeftSidebarOpen,
   isMobile,
   mainView,
@@ -40,39 +42,74 @@ export default function AppHeader({
 }: AppHeaderProps) {
   return (
     <Box sx={{
-      height: { xs: 52, md: 60 },
-      px: { xs: 1, md: 2 },
+      height: { xs: 52, md: 58 },
+      px: { xs: 1, md: 1.75 },
       display: 'flex',
       alignItems: 'center',
       borderBottom: 1,
       borderColor: 'divider',
-      bgcolor: 'background.default',
+      bgcolor: 'background.paper',
       zIndex: 1200,
       flexShrink: 0,
+      gap: { xs: 0.75, md: 1.25 },
     }}>
       <IconButton onClick={onToggleLeftSidebar} size="small">
         {isLeftSidebarOpen && !isMobile ? <ChevronLeftIcon /> : <MenuIcon />}
       </IconButton>
 
-      <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.75 }}>
+      <Box sx={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 0.75 }}>
         <Box
           component="img"
           src="/terminal-cap/logo-terminal-cap-mark.svg"
           alt="ml-junior"
-          sx={{ width: { xs: 22, md: 24 }, height: { xs: 22, md: 24 } }}
+          sx={{ width: { xs: 24, md: 26 }, height: { xs: 24, md: 26 }, flexShrink: 0 }}
         />
         <Typography
           variant="subtitle1"
           sx={{
-            fontWeight: 800,
+            fontWeight: 700,
             color: 'var(--text)',
             letterSpacing: 0,
-            fontSize: { xs: '0.88rem', md: '0.95rem' },
+            fontSize: { xs: '0.9rem', md: '1rem' },
+            lineHeight: 1,
+            whiteSpace: 'nowrap',
           }}
         >
           ml-junior
         </Typography>
       </Box>
+
+      {activeTitle && (
+        <Box
+          sx={{
+            minWidth: 0,
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            color: 'text.secondary',
+          }}
+        >
+          <Box sx={{ width: '1px', height: 22, bgcolor: 'divider', flexShrink: 0, display: { xs: 'none', sm: 'block' } }} />
+          <Typography
+            variant="body2"
+            sx={{
+              display: { xs: 'none', sm: 'block' },
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontWeight: 500,
+              color: 'text.secondary',
+            }}
+          >
+            {activeTitle}
+          </Typography>
+        </Box>
+      )}
+
+      {!activeTitle && <Box sx={{ flex: 1 }} />}
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
         <ToggleButtonGroup
@@ -93,9 +130,10 @@ export default function AppHeader({
               border: 0,
               borderRadius: '6px',
               color: 'text.secondary',
+              minWidth: { xs: 34, sm: 38 },
               '&.Mui-selected': {
                 bgcolor: 'var(--accent-yellow-weak)',
-                color: 'primary.main',
+                color: 'text.primary',
               },
             },
           }}

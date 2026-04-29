@@ -222,6 +222,7 @@ export default function AppLayout() {
         }}
       >
         <AppHeader
+          activeTitle={activeSession?.title ?? null}
           isLeftSidebarOpen={isLeftSidebarOpen}
           isMobile={isMobile}
           mainView={mainView}
@@ -277,11 +278,11 @@ export default function AppLayout() {
                   px: 2,
                 }}
               >
-                <Typography variant="h5" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: { xs: '1rem', md: '1.5rem' } }}>
-                  NO SESSION SELECTED
+                <Typography variant="h5" color="text.secondary" sx={{ fontWeight: 700, fontSize: { xs: '1rem', md: '1.35rem' } }}>
+                  No session selected
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: { xs: '0.75rem', md: '0.875rem' } }}>
-                  Initialize a session via the sidebar
+                <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.78rem', md: '0.9rem' } }}>
+                  Choose a session from the sidebar.
                 </Typography>
               </Box>
             )}
@@ -294,7 +295,7 @@ export default function AppLayout() {
               display: mainView === 'dashboard' ? 'block' : 'none',
               overflow: 'auto',
               minWidth: 0,
-              background: '#E8E6E0',
+              background: 'var(--bg)',
             }}
           >
             <ProjectDashboard snapshot={dashboardSnapshot} activeSession={activeSession} />
@@ -366,9 +367,9 @@ export default function AppLayout() {
           severity="warning"
           variant="filled"
           onClose={() => setShowExpiredToast(false)}
-          sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}
+          sx={{ fontSize: '0.8rem' }}
         >
-          Task expired — create a new task to continue.
+          Task expired. Create a new task to continue.
         </Alert>
       </Snackbar>
       <Snackbar

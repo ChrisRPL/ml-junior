@@ -2,10 +2,10 @@ import { createTheme, type ThemeOptions } from '@mui/material/styles';
 
 // ── Shared tokens ────────────────────────────────────────────────
 const sharedTypography: ThemeOptions['typography'] = {
-  fontFamily: '"Space Grotesk", "Avenir Next", "Trebuchet MS", sans-serif',
+  fontFamily: '"Space Grotesk", sans-serif',
   fontSize: 15,
   button: {
-    fontFamily: '"Space Grotesk", "Avenir Next", "Trebuchet MS", sans-serif',
+    fontFamily: '"Space Grotesk", sans-serif',
     textTransform: 'none' as const,
     fontWeight: 600,
   },
@@ -81,19 +81,19 @@ const lightVars = {
   '--accent-blue': '#3A72C8',
   '--accent-green': '#2F9B73',
   '--accent-red': '#C85644',
-  '--shadow-1': '0 4px 12px rgba(20,20,32,0.08)',
+  '--shadow-1': '0 2px 8px rgba(20,20,32,0.06)',
   '--radius-lg': '8px',
   '--radius-md': '8px',
   '--focus': '0 0 0 3px rgba(212,147,58,0.18)',
-  '--border': 'rgba(0,0,0,0.08)',
-  '--border-hover': 'rgba(0,0,0,0.15)',
+  '--border': '#E6E4DF',
+  '--border-hover': '#DCD7CE',
   '--code-bg': 'rgba(0,0,0,0.04)',
   '--tool-bg': 'rgba(0,0,0,0.03)',
   '--tool-border': 'rgba(0,0,0,0.08)',
   '--hover-bg': 'rgba(0,0,0,0.04)',
   '--composer-bg': 'rgba(0,0,0,0.02)',
   '--msg-gradient': 'linear-gradient(180deg, rgba(0,0,0,0.01), transparent)',
-  '--body-gradient': 'linear-gradient(180deg, #E8E6E0, #FAFAF8)',
+  '--body-gradient': '#E8E6E0',
   '--scrollbar-thumb': '#B3AFA7',
   '--success-icon': '#D4933A',
   '--error-icon': '#C85644',
@@ -107,14 +107,19 @@ const lightVars = {
   '--plan-bg': 'rgba(0,0,0,0.03)',
 } as const;
 
-// ── Shared CSS baseline (scrollbar, code, brand-logo) ────────────
+// ── Shared CSS baseline (scrollbar, code) ────────────────────────
 function makeCssBaseline(vars: Record<string, string>) {
   return {
     styleOverrides: {
       ':root': vars,
+      'html, body, #root': {
+        width: '100%',
+        height: '100%',
+      },
       body: {
         background: 'var(--body-gradient)',
         color: 'var(--text)',
+        fontFamily: '"Space Grotesk", sans-serif',
         scrollbarWidth: 'thin' as const,
         '&::-webkit-scrollbar': { width: '8px', height: '8px' },
         '&::-webkit-scrollbar-thumb': {
@@ -124,21 +129,7 @@ function makeCssBaseline(vars: Record<string, string>) {
         '&::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
       },
       'code, pre': {
-        fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-      },
-      '.brand-logo': {
-        position: 'relative' as const,
-        padding: '6px',
-        borderRadius: '8px',
-        '&::after': {
-          content: '""',
-          position: 'absolute' as const,
-          inset: '-6px',
-          borderRadius: '10px',
-          background: 'var(--accent-yellow-weak)',
-          zIndex: -1,
-          pointerEvents: 'none' as const,
-        },
+        fontFamily: '"JetBrains Mono", monospace',
       },
     },
   };
@@ -222,4 +213,4 @@ export const lightTheme = createTheme({
 });
 
 // Keep default export for backwards compat
-export default darkTheme;
+export default lightTheme;
