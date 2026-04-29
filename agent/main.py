@@ -21,10 +21,11 @@ import litellm
 from prompt_toolkit import PromptSession
 
 from agent.config import load_config
-from agent.core.commands import parse_slash_command
-from agent.core.agent_loop import submission_loop
-from agent.core.flow_commands import FlowCommandError, render_flow_command
 from agent.core import model_switcher
+from agent.core.agent_loop import submission_loop
+from agent.core.command_completions import build_slash_command_completer
+from agent.core.commands import parse_slash_command
+from agent.core.flow_commands import FlowCommandError, render_flow_command
 from agent.core.session import OpType
 from agent.core.tools import ToolRouter
 from agent.utils.reliability_checks import check_training_script_save_pattern
@@ -869,7 +870,7 @@ async def main():
     os.system("clear" if os.name != "nt" else "cls")
 
     # Create prompt session for input (needed early for token prompt)
-    prompt_session = PromptSession()
+    prompt_session = PromptSession(completer=build_slash_command_completer())
 
     # HF token — required, prompt if missing
     hf_token = _get_hf_token()
