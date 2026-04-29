@@ -1,9 +1,9 @@
 """Pydantic models for API requests and responses."""
 
 from enum import Enum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OpType(str, Enum):
@@ -161,6 +161,100 @@ class WorkflowState(BaseModel):
     compatibility: WorkflowCompatibility
     last_event_sequence: int
     updated_at: str | None = None
+
+
+class ContinuityModel(BaseModel):
+    """Closed-schema base for metadata-only continuity records."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PhaseContinuityRef(ContinuityModel):
+    type: Literal["phase"]
+    phase_id: str = Field(min_length=1)
+
+
+class RunContinuityRef(ContinuityModel):
+    type: Literal["run"]
+    run_id: str = Field(min_length=1)
+
+
+class CodeSnapshotContinuityRef(ContinuityModel):
+    type: Literal["code_snapshot"]
+    snapshot_id: str = Field(min_length=1)
+
+
+class DatasetSnapshotContinuityRef(ContinuityModel):
+    type: Literal["dataset_snapshot"]
+    snapshot_id: str = Field(min_length=1)
+
+
+class ModelCheckpointContinuityRef(ContinuityModel):
+    type: Literal["model_checkpoint"]
+    checkpoint_id: str = Field(min_length=1)
+
+
+class EventSequenceContinuityRef(ContinuityModel):
+    type: Literal["event_sequence"]
+    sequence: int = Field(ge=1)
+
+
+ContinuityRef = Annotated[
+    PhaseContinuityRef
+    | RunContinuityRef
+    | CodeSnapshotContinuityRef
+    | DatasetSnapshotContinuityRef
+    | ModelCheckpointContinuityRef
+    | EventSequenceContinuityRef,
+    Field(discriminator="type"),
+]
+
+
+class ProjectCheckpoint(ContinuityModel):
+    """Metadata-only checkpoint record; referenced records are not created here."""
+
+    session_id: str = Field(min_length=1)
+    checkpoint_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    phase_id: str | None = Field(default=None, min_length=1)
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    refs: list[ContinuityRef] | None = None
+
+
+class ProjectForkPoint(ContinuityModel):
+    """Metadata-only fork point with typed references to existing records."""
+
+    session_id: str = Field(min_length=1)
+    fork_point_id: str = Field(min_length=1)
+    reason: str | None = Field(default=None, min_length=1)
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    refs: list[ContinuityRef] = Field(default_factory=list)
+
+
+class HandoffSummary(ContinuityModel):
+    """Pure handoff projection; empty values mean no durable source recorded them."""
+
+    session_id: str = Field(min_length=1)
+    source_event_sequence: int | None = Field(default=None, ge=0)
+    goal: str | None = None
+    completed_phases: list[dict[str, Any]] = Field(default_factory=list)
+    current_phase: dict[str, Any] | None = None
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    jobs: list[dict[str, Any]] = Field(default_factory=list)
+    failures: list[dict[str, Any]] = Field(default_factory=list)
+    risks: list[dict[str, Any]] = Field(default_factory=list)
+    next_action: str = "not_recorded"
+
+
+class HandoffSummaryCreatedEvent(ContinuityModel):
+    """Durable metadata payload for a generated handoff summary."""
+
+    session_id: str = Field(min_length=1)
+    handoff_id: str = Field(min_length=1)
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    summary: HandoffSummary
 
 
 class FlowTemplateMetadata(BaseModel):

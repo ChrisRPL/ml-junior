@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -108,6 +108,98 @@ class PlanUpdatePayload(EventPayload):
     plan: list[PlanItemPayload]
 
 
+class StrictEventPayload(EventPayload):
+    """Payload base for durable metadata events with a closed schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PhaseContinuityRefPayload(StrictEventPayload):
+    type: Literal["phase"]
+    phase_id: str = Field(min_length=1)
+
+
+class RunContinuityRefPayload(StrictEventPayload):
+    type: Literal["run"]
+    run_id: str = Field(min_length=1)
+
+
+class CodeSnapshotContinuityRefPayload(StrictEventPayload):
+    type: Literal["code_snapshot"]
+    snapshot_id: str = Field(min_length=1)
+
+
+class DatasetSnapshotContinuityRefPayload(StrictEventPayload):
+    type: Literal["dataset_snapshot"]
+    snapshot_id: str = Field(min_length=1)
+
+
+class ModelCheckpointContinuityRefPayload(StrictEventPayload):
+    type: Literal["model_checkpoint"]
+    checkpoint_id: str = Field(min_length=1)
+
+
+class EventSequenceContinuityRefPayload(StrictEventPayload):
+    type: Literal["event_sequence"]
+    sequence: int = Field(ge=1)
+
+
+ContinuityRefPayload = Annotated[
+    PhaseContinuityRefPayload
+    | RunContinuityRefPayload
+    | CodeSnapshotContinuityRefPayload
+    | DatasetSnapshotContinuityRefPayload
+    | ModelCheckpointContinuityRefPayload
+    | EventSequenceContinuityRefPayload,
+    Field(discriminator="type"),
+]
+
+
+class CheckpointCreatedPayload(StrictEventPayload):
+    session_id: str = Field(min_length=1)
+    checkpoint_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    phase_id: str | None = Field(default=None, min_length=1)
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    refs: list[ContinuityRefPayload] | None = None
+
+
+class ForkPointCreatedPayload(StrictEventPayload):
+    session_id: str = Field(min_length=1)
+    fork_point_id: str = Field(min_length=1)
+    reason: str | None = Field(default=None, min_length=1)
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    refs: list[ContinuityRefPayload] = Field(default_factory=list)
+
+
+class HandoffSummarySnapshotPayload(StrictEventPayload):
+    session_id: str = Field(min_length=1)
+    source_event_sequence: int | None = Field(default=None, ge=0)
+    goal: str | None = None
+    completed_phases: list[dict[str, Any]] = Field(default_factory=list)
+    current_phase: dict[str, Any] | None = None
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    jobs: list[dict[str, Any]] = Field(default_factory=list)
+    failures: list[dict[str, Any]] = Field(default_factory=list)
+    risks: list[dict[str, Any]] = Field(default_factory=list)
+    next_action: str = "not_recorded"
+
+
+class HandoffSummaryCreatedPayload(StrictEventPayload):
+    session_id: str = Field(min_length=1)
+    handoff_id: str = Field(min_length=1)
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    summary: HandoffSummarySnapshotPayload
+
+    @model_validator(mode="after")
+    def validate_summary_session(self) -> HandoffSummaryCreatedPayload:
+        if self.summary.session_id != self.session_id:
+            raise ValueError("summary.session_id must match session_id")
+        return self
+
+
 EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
     "ready": MessagePayload,
     "processing": MessagePayload,
@@ -126,6 +218,9 @@ EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
     "interrupted": EmptyPayload,
     "undo_complete": EmptyPayload,
     "plan_update": PlanUpdatePayload,
+    "checkpoint.created": CheckpointCreatedPayload,
+    "fork_point.created": ForkPointCreatedPayload,
+    "handoff.summary_created": HandoffSummaryCreatedPayload,
 }
 
 
