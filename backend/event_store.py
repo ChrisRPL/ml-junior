@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -26,41 +26,25 @@ class SQLiteEventStore:
     def append(self, event: AgentEvent) -> AgentEvent:
         """Persist a redacted event envelope and return the stored copy."""
         stored_event = event.redacted_copy()
-        data_json = json.dumps(
-            stored_event.data,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        )
 
         with self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO agent_events (
-                    id,
-                    session_id,
-                    sequence,
-                    timestamp,
-                    event_type,
-                    schema_version,
-                    redaction_status,
-                    data_json
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    stored_event.id,
-                    stored_event.session_id,
-                    stored_event.sequence,
-                    stored_event.timestamp.isoformat(),
-                    stored_event.event_type,
-                    stored_event.schema_version,
-                    stored_event.redaction_status,
-                    data_json,
-                ),
-            )
+            self._connection.execute(_INSERT_EVENT_SQL, _event_row(stored_event))
 
         return stored_event
+
+    def append_many(self, events: Iterable[AgentEvent]) -> list[AgentEvent]:
+        """Persist redacted event envelopes atomically and return stored copies."""
+        stored_events = [event.redacted_copy() for event in events]
+        if not stored_events:
+            return []
+
+        with self._connection:
+            self._connection.executemany(
+                _INSERT_EVENT_SQL,
+                [_event_row(event) for event in stored_events],
+            )
+
+        return stored_events
 
     def replay(
         self,
@@ -134,3 +118,37 @@ class SQLiteEventStore:
             redaction_status=row["redaction_status"],
             data=json.loads(row["data_json"]),
         )
+
+
+_INSERT_EVENT_SQL = """
+    INSERT INTO agent_events (
+        id,
+        session_id,
+        sequence,
+        timestamp,
+        event_type,
+        schema_version,
+        redaction_status,
+        data_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+
+def _event_row(event: AgentEvent) -> tuple[Any, ...]:
+    data_json = json.dumps(
+        event.data,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return (
+        event.id,
+        event.session_id,
+        event.sequence,
+        event.timestamp.isoformat(),
+        event.event_type,
+        event.schema_version,
+        event.redaction_status,
+        data_json,
+    )

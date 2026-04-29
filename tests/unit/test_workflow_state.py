@@ -249,6 +249,101 @@ def test_duplicate_replay_events_are_deduplicated():
     assert state.last_event_sequence == 1
 
 
+def test_phase_events_project_current_workflow_phase():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_event(
+                sequence=1,
+                event_type="phase.started",
+                data={
+                    "session_id": "session-a",
+                    "project_id": "session:session-a",
+                    "template_id": "mnist-baseline",
+                    "template_version": "v1",
+                    "phase_id": "train",
+                    "phase_name": "Train",
+                    "to_status": "active",
+                },
+            ),
+            make_event(
+                sequence=2,
+                event_type="phase.completed",
+                data={
+                    "session_id": "session-a",
+                    "project_id": "session:session-a",
+                    "template_id": "mnist-baseline",
+                    "template_version": "v1",
+                    "phase_id": "train",
+                    "phase_name": "Train",
+                    "to_status": "complete",
+                    "gate_status": "satisfied",
+                    "waiver_records": [
+                        {"output_id": "metrics-json", "approved_by": "alice"}
+                    ],
+                },
+            ),
+        ],
+    )
+
+    assert state.status == "completed"
+    assert state.phase.model_dump() == {
+        "id": "train",
+        "label": "Train",
+        "status": "complete",
+        "started_at": "2026-01-02T03:04:01+00:00",
+        "updated_at": "2026-01-02T03:04:02+00:00",
+    }
+    assert state.blockers == []
+
+
+def test_phase_blocked_event_projects_gate_blocker_with_verifier_pending():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_event(
+                sequence=1,
+                event_type="phase.blocked",
+                data={
+                    "session_id": "session-a",
+                    "project_id": "session:session-a",
+                    "template_id": "mnist-baseline",
+                    "template_version": "v1",
+                    "phase_id": "train",
+                    "phase_name": "Train",
+                    "requested_status": "complete",
+                    "to_status": "blocked",
+                    "gate_status": "verifier_pending",
+                    "missing_outputs": [],
+                    "pending_verifiers": ["accuracy-threshold"],
+                    "failed_verifiers": [],
+                    "waiver_records": [],
+                },
+            )
+        ],
+    )
+
+    assert state.status == "blocked"
+    assert state.phase.id == "train"
+    assert state.phase.status == "blocked"
+    assert state.blockers == [
+        {
+            "source": "event",
+            "type": "phase_gate",
+            "source_event_sequence": 1,
+            "updated_at": "2026-01-02T03:04:01+00:00",
+            "phase_id": "train",
+            "gate_status": "verifier_pending",
+            "requested_status": "complete",
+            "to_status": "blocked",
+            "missing_outputs": [],
+            "pending_verifiers": ["accuracy-threshold"],
+            "failed_verifiers": [],
+            "waiver_records": [],
+        }
+    ]
+
+
 def test_stale_no_event_session_uses_explicit_placeholders(tmp_path):
     clock = DeterministicClock()
     store = SQLiteSessionStore(tmp_path / "sessions.sqlite", clock=clock)

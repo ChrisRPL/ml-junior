@@ -52,6 +52,27 @@ _PROCESSING_EVENTS = {
     "tool_output",
     "tool_state_change",
 }
+_PHASE_EVENT_TYPES = {
+    "phase.not_started",
+    "phase.pending",
+    "phase.started",
+    "phase.blocked",
+    "phase.completed",
+    "phase.failed",
+    "phase.verified",
+}
+_PHASE_EVENT_STATUS = {
+    "not_started": "placeholder",
+    "pending": "pending",
+    "active": "active",
+    "started": "active",
+    "blocked": "blocked",
+    "complete": "complete",
+    "completed": "complete",
+    "verified": "complete",
+    "failed": "failed",
+    "verifier_pending": "blocked",
+}
 
 
 def build_workflow_state(
@@ -75,6 +96,9 @@ def build_workflow_state(
     plan_items: list[WorkflowPlanItem] = []
     event_pending_approvals: dict[str, dict[str, Any]] = {}
     active_jobs: dict[str, dict[str, Any]] = {}
+    phase_projection: PhaseState | None = None
+    phase_started_at: dict[str, str | None] = {}
+    phase_blockers: list[dict[str, Any]] = []
     status = "stale" if stale else "idle"
 
     for event in unique_events:
@@ -95,6 +119,15 @@ def build_workflow_state(
             _apply_tool_event(active_jobs, event, event_timestamp)
         elif event.event_type == "turn_complete":
             event_pending_approvals = {}
+        elif event.event_type in _PHASE_EVENT_TYPES:
+            projected_phase = _phase_state_from_event(
+                event,
+                event_timestamp,
+                phase_started_at,
+            )
+            if projected_phase is not None:
+                phase_projection = projected_phase
+            phase_blockers = _phase_blockers_from_event(event, event_timestamp)
 
     pending_approvals = _merge_refs(
         event_pending_approvals.values(),
@@ -132,9 +165,9 @@ def build_workflow_state(
         project_id=f"session:{session_id}",
         status=status,
         objective=WorkflowObjective(),
-        phase=_phase_state(session_record, status, updated_at),
+        phase=phase_projection or _phase_state(session_record, status, updated_at),
         plan=plan_items,
-        blockers=[],
+        blockers=phase_blockers,
         pending_approvals=pending_approvals,
         active_jobs=active_job_refs,
         operation_refs=_operation_refs(operations or []),
@@ -191,6 +224,63 @@ def _phase_state(
         started_at=started_at,
         updated_at=updated_at,
     )
+
+
+def _phase_state_from_event(
+    event: AgentEvent,
+    updated_at: str | None,
+    phase_started_at: dict[str, str | None],
+) -> PhaseState | None:
+    data = event.data or {}
+    phase_id = data.get("phase_id")
+    if phase_id is None:
+        return None
+    phase_id = str(phase_id)
+
+    if event.event_type == "phase.started":
+        phase_started_at[phase_id] = updated_at
+
+    return PhaseState(
+        id=phase_id,
+        label=str(data.get("phase_name") or phase_id),
+        status=_phase_event_status(event),
+        started_at=phase_started_at.get(phase_id),
+        updated_at=updated_at,
+    )
+
+
+def _phase_event_status(event: AgentEvent) -> str:
+    data = event.data or {}
+    raw_status = data.get("to_status") or data.get("status")
+    if raw_status is None:
+        raw_status = event.event_type.removeprefix("phase.")
+    return _PHASE_EVENT_STATUS.get(str(raw_status).strip().lower(), "blocked")
+
+
+def _phase_blockers_from_event(
+    event: AgentEvent,
+    updated_at: str | None,
+) -> list[dict[str, Any]]:
+    if event.event_type != "phase.blocked":
+        return []
+
+    data = event.data or {}
+    return [
+        {
+            "source": "event",
+            "type": "phase_gate",
+            "source_event_sequence": event.sequence,
+            "updated_at": updated_at,
+            "phase_id": data.get("phase_id"),
+            "gate_status": data.get("gate_status"),
+            "requested_status": data.get("requested_status"),
+            "to_status": data.get("to_status"),
+            "missing_outputs": list(data.get("missing_outputs") or []),
+            "pending_verifiers": list(data.get("pending_verifiers") or []),
+            "failed_verifiers": list(data.get("failed_verifiers") or []),
+            "waiver_records": list(data.get("waiver_records") or []),
+        }
+    ]
 
 
 def _phase_status(status: str) -> str:
@@ -299,6 +389,8 @@ def _drop_active_job(
 
 
 def _status_from_last_event(event: AgentEvent) -> str:
+    if event.event_type in _PHASE_EVENT_TYPES:
+        return _workflow_status_from_phase_event(event)
     if event.event_type == "ready":
         return "idle"
     if event.event_type == "approval_required":
@@ -310,6 +402,19 @@ def _status_from_last_event(event: AgentEvent) -> str:
     if event.event_type in {"shutdown", "turn_complete"}:
         return "completed"
     if event.event_type in _PROCESSING_EVENTS:
+        return "processing"
+    return "idle"
+
+
+def _workflow_status_from_phase_event(event: AgentEvent) -> str:
+    phase_status = _phase_event_status(event)
+    if phase_status == "blocked":
+        return "blocked"
+    if phase_status == "failed":
+        return "error"
+    if phase_status == "complete":
+        return "completed"
+    if phase_status in {"pending", "active"}:
         return "processing"
     return "idle"
 

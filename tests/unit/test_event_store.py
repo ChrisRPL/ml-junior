@@ -147,3 +147,56 @@ def test_append_redacts_envelope_data_before_sqlite_persistence(tmp_path):
     assert secret not in stored_payload
     assert secret not in database_dump
     assert "Authorization: Bearer [REDACTED]" in stored_payload
+
+
+def test_append_many_persists_phase_events_atomically(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.sqlite")
+    events = [
+        make_event(
+            session_id="session-a",
+            sequence=1,
+            event_type="phase.verified",
+            data={"session_id": "session-a", "phase_id": "train"},
+        ),
+        make_event(
+            session_id="session-a",
+            sequence=2,
+            event_type="phase.completed",
+            data={"session_id": "session-a", "phase_id": "train"},
+        ),
+    ]
+
+    stored = store.append_many(events)
+    replayed = store.replay("session-a")
+
+    assert [event.event_type for event in stored] == [
+        "phase.verified",
+        "phase.completed",
+    ]
+    assert replayed == stored
+
+    duplicate = make_event(
+        session_id="session-a",
+        sequence=2,
+        event_type="phase.blocked",
+        data={"session_id": "session-a", "phase_id": "eval"},
+    )
+
+    try:
+        store.append_many(
+            [
+                make_event(
+                    session_id="session-a",
+                    sequence=3,
+                    event_type="phase.started",
+                    data={"session_id": "session-a", "phase_id": "eval"},
+                ),
+                duplicate,
+            ]
+        )
+    except sqlite3.IntegrityError:
+        pass
+    else:
+        raise AssertionError("duplicate sequence should fail atomically")
+
+    assert [event.sequence for event in store.replay("session-a")] == [1, 2]

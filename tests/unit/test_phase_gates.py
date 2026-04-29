@@ -85,6 +85,7 @@ def test_valid_completion_transition_returns_phase_events() -> None:
         "template_id": "mnist-baseline",
         "template_version": "v1",
         "phase_id": "train",
+        "phase_name": "Train",
         "phase_order": 1,
         "from_status": "active",
         "requested_status": "complete",

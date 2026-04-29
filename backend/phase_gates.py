@@ -287,6 +287,7 @@ def _transition_events(
         "template_id": template.id,
         "template_version": template.version,
         "phase_id": phase.id,
+        "phase_name": phase.name,
         "phase_order": phase.order,
         "from_status": from_status,
         "requested_status": requested_status,
