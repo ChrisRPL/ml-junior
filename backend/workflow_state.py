@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from agent.core.events import AgentEvent
+from backend.job_artifact_refs import project_active_jobs, project_artifact_refs
 from backend.operation_store import OperationRecord
 from backend.session_store import SessionRecord
 
@@ -83,7 +84,9 @@ def build_workflow_state(
     operations: list[OperationRecord] | None = None,
 ) -> WorkflowState:
     """Build a read-only workflow projection from durable backend state."""
-    unique_events = _dedupe_events(events)
+    unique_events = _dedupe_events(
+        [event for event in events if event.session_id == session_id]
+    )
     last_event_sequence = max((event.sequence for event in unique_events), default=0)
     last_event = unique_events[-1] if unique_events else None
     last_event_timestamp = _event_timestamp(last_event)
@@ -96,6 +99,8 @@ def build_workflow_state(
     plan_items: list[WorkflowPlanItem] = []
     event_pending_approvals: dict[str, dict[str, Any]] = {}
     active_jobs: dict[str, dict[str, Any]] = {}
+    recorded_active_jobs = _active_job_refs_from_events(session_id, unique_events)
+    recorded_artifact_refs = _artifact_refs_from_events(session_id, unique_events)
     phase_projection: PhaseState | None = None
     phase_started_at: dict[str, str | None] = {}
     phase_blockers: list[dict[str, Any]] = []
@@ -139,10 +144,13 @@ def build_workflow_state(
     )
     active_job_refs = _merge_refs(
         active_jobs.values(),
-        _durable_refs(
-            getattr(session_record, "active_job_refs", []),
-            source="durable",
-        ),
+        [
+            *recorded_active_jobs,
+            *_durable_refs(
+                getattr(session_record, "active_job_refs", []),
+                source="durable",
+            ),
+        ],
         key_names=("job_id", "tool_call_id", "id"),
     )
 
@@ -173,7 +181,7 @@ def build_workflow_state(
         operation_refs=_operation_refs(operations or []),
         human_requests=[],
         budget=_budget_placeholder(),
-        evidence_summary=_evidence_summary_placeholder(),
+        evidence_summary=_evidence_summary(recorded_artifact_refs),
         live_tracking_refs=[_live_tracking_placeholder(session_id)],
         resume=WorkflowResumeState(event_sequence=last_event_sequence),
         compatibility=WorkflowCompatibility(
@@ -470,6 +478,29 @@ def _operation_refs(operations: list[OperationRecord]) -> list[dict[str, Any]]:
     ]
 
 
+def _active_job_refs_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "source": "event",
+            **record.model_dump(mode="json", exclude_none=True),
+        }
+        for record in project_active_jobs(session_id, events)
+    ]
+
+
+def _artifact_refs_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    return [
+        record.model_dump(mode="json", exclude_none=True)
+        for record in project_artifact_refs(session_id, events)
+    ]
+
+
 def _budget_placeholder() -> dict[str, Any]:
     return {
         "source": "placeholder",
@@ -478,6 +509,20 @@ def _budget_placeholder() -> dict[str, Any]:
         "limit": None,
         "used": None,
         "items": [],
+    }
+
+
+def _evidence_summary(artifact_refs: list[dict[str, Any]]) -> dict[str, Any]:
+    if not artifact_refs:
+        return _evidence_summary_placeholder()
+
+    return {
+        "source": "event",
+        "status": "available",
+        "claim_count": 0,
+        "artifact_count": len(artifact_refs),
+        "metric_count": 0,
+        "items": artifact_refs,
     }
 
 

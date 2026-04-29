@@ -429,6 +429,53 @@ class ExperimentRunRecord(ExperimentLedgerModel):
     created_at: NonEmptyStr | None = None
 
 
+class ActiveJobRecord(ExperimentLedgerModel):
+    """Inert active job reference projected from durable events."""
+
+    session_id: NonEmptyStr
+    job_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    tool_call_id: NonEmptyStr | None = None
+    tool: NonEmptyStr | None = None
+    provider: Literal["huggingface_jobs", "local", "sandbox", "external", "unknown"]
+    status: Literal["queued", "running", "completed", "failed", "cancelled", "unknown"]
+    url: NonEmptyStr | None = None
+    label: NonEmptyStr | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    redaction_status: Literal["none", "partial", "redacted"]
+    started_at: NonEmptyStr | None = None
+    updated_at: NonEmptyStr | None = None
+    completed_at: NonEmptyStr | None = None
+
+
+class ArtifactRefRecord(ExperimentLedgerModel):
+    """Inert artifact reference projected from durable events."""
+
+    session_id: NonEmptyStr
+    artifact_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    type: NonEmptyStr
+    source: Literal[
+        "tool",
+        "job",
+        "local_path",
+        "remote_uri",
+        "hf_hub",
+        "event_ref",
+        "manual",
+    ]
+    source_tool_call_id: NonEmptyStr | None = None
+    source_job_id: NonEmptyStr | None = None
+    path: NonEmptyStr | None = None
+    uri: NonEmptyStr | None = None
+    digest: NonEmptyStr | None = None
+    label: NonEmptyStr | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    privacy_class: Literal["public", "private", "sensitive", "unknown"]
+    redaction_status: Literal["none", "partial", "redacted"]
+    created_at: NonEmptyStr | None = None
+
+
 class FlowTemplateMetadata(BaseModel):
     """Derived catalog metadata for a built-in flow template."""
 

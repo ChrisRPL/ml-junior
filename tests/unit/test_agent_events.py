@@ -437,6 +437,45 @@ def _valid_code_snapshot_recorded_payload() -> dict:
     }
 
 
+def _valid_active_job_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "job_id": " active-job-1 ",
+        "source_event_sequence": 8,
+        "tool_call_id": " tc-1 ",
+        "tool": " hf_jobs ",
+        "provider": "huggingface_jobs",
+        "status": "running",
+        "url": " https://example.test/jobs/1 ",
+        "label": " Training Job ",
+        "metadata": {"queue": "cpu"},
+        "redaction_status": "partial",
+        "started_at": " 2026-04-29T10:03:00Z ",
+        "updated_at": " 2026-04-29T10:04:00Z ",
+        "completed_at": None,
+    }
+
+
+def _valid_artifact_ref_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "artifact_id": " artifact-1 ",
+        "source_event_sequence": 9,
+        "type": " model_checkpoint ",
+        "source": "job",
+        "source_tool_call_id": " tc-1 ",
+        "source_job_id": " active-job-1 ",
+        "path": " /tmp/model.pt ",
+        "uri": " file:///tmp/model.pt ",
+        "digest": " sha256:model ",
+        "label": " Best checkpoint ",
+        "metadata": {"epoch": 3},
+        "privacy_class": "private",
+        "redaction_status": "none",
+        "created_at": " 2026-04-29T10:05:00Z ",
+    }
+
+
 def test_dataset_snapshot_recorded_payload_validates_and_normalizes():
     event = AgentEvent(
         session_id="session-a",
@@ -606,6 +645,160 @@ def test_snapshot_recorded_payloads_reject_invalid_literals(
         AgentEvent(
             session_id="session-a",
             sequence=11,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+def test_active_job_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=12,
+        event_type="active_job.recorded",
+        data=_valid_active_job_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["job_id"] == "active-job-1"
+    assert event.data["tool_call_id"] == "tc-1"
+    assert event.data["tool"] == "hf_jobs"
+    assert event.data["url"] == "https://example.test/jobs/1"
+    assert event.data["label"] == "Training Job"
+    assert event.data["started_at"] == "2026-04-29T10:03:00Z"
+    assert "completed_at" not in event.data
+
+
+def test_artifact_ref_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=13,
+        event_type="artifact_ref.recorded",
+        data=_valid_artifact_ref_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["artifact_id"] == "artifact-1"
+    assert event.data["type"] == "model_checkpoint"
+    assert event.data["source_tool_call_id"] == "tc-1"
+    assert event.data["source_job_id"] == "active-job-1"
+    assert event.data["path"] == "/tmp/model.pt"
+    assert event.data["label"] == "Best checkpoint"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory"),
+    [
+        ("active_job.recorded", _valid_active_job_recorded_payload),
+        ("artifact_ref.recorded", _valid_artifact_ref_recorded_payload),
+    ],
+)
+def test_job_artifact_payloads_reject_unknown_top_level_fields(
+    event_type,
+    payload_factory,
+):
+    payload = payload_factory()
+    payload["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=14,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "path"),
+    [
+        ("active_job.recorded", _valid_active_job_recorded_payload, ("session_id",)),
+        ("active_job.recorded", _valid_active_job_recorded_payload, ("job_id",)),
+        ("active_job.recorded", _valid_active_job_recorded_payload, ("label",)),
+        ("artifact_ref.recorded", _valid_artifact_ref_recorded_payload, ("session_id",)),
+        (
+            "artifact_ref.recorded",
+            _valid_artifact_ref_recorded_payload,
+            ("artifact_id",),
+        ),
+        ("artifact_ref.recorded", _valid_artifact_ref_recorded_payload, ("type",)),
+    ],
+)
+def test_job_artifact_payloads_reject_empty_required_ids_and_text(
+    event_type,
+    payload_factory,
+    path,
+):
+    payload = payload_factory()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = ""
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=14,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "field", "value"),
+    [
+        (
+            "active_job.recorded",
+            _valid_active_job_recorded_payload,
+            "provider",
+            "github_actions",
+        ),
+        (
+            "active_job.recorded",
+            _valid_active_job_recorded_payload,
+            "status",
+            "paused",
+        ),
+        (
+            "active_job.recorded",
+            _valid_active_job_recorded_payload,
+            "redaction_status",
+            "complete",
+        ),
+        (
+            "artifact_ref.recorded",
+            _valid_artifact_ref_recorded_payload,
+            "source",
+            "scan",
+        ),
+        (
+            "artifact_ref.recorded",
+            _valid_artifact_ref_recorded_payload,
+            "privacy_class",
+            "internal",
+        ),
+        (
+            "artifact_ref.recorded",
+            _valid_artifact_ref_recorded_payload,
+            "redaction_status",
+            "complete",
+        ),
+    ],
+)
+def test_job_artifact_payloads_reject_invalid_literals(
+    event_type,
+    payload_factory,
+    field,
+    value,
+):
+    payload = payload_factory()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=14,
             event_type=event_type,
             data=payload,
         )

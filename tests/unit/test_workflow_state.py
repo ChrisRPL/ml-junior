@@ -4,6 +4,10 @@ from datetime import datetime, timedelta, timezone
 
 from agent.core.events import AgentEvent
 from backend.event_store import SQLiteEventStore
+from backend.job_artifact_refs import (
+    ACTIVE_JOB_RECORDED_EVENT,
+    ARTIFACT_REF_RECORDED_EVENT,
+)
 from backend.operation_store import OPERATION_RUNNING, SQLiteOperationStore
 from backend.session_store import SQLiteSessionStore
 from backend.workflow_state import build_workflow_state
@@ -36,6 +40,75 @@ def make_event(
         event_type=event_type,
         data=data,
     )
+
+
+def make_active_job_recorded_event(
+    *,
+    sequence: int,
+    job_id: str = "active-job-1",
+    status: str = "running",
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    return make_event(
+        sequence=sequence,
+        event_type=ACTIVE_JOB_RECORDED_EVENT,
+        session_id=session_id,
+        data={
+            "session_id": session_id,
+            "job_id": job_id,
+            "source_event_sequence": source_event_sequence or sequence,
+            "tool_call_id": "tc-1",
+            "tool": "hf_jobs",
+            "provider": "huggingface_jobs",
+            "status": status,
+            "url": f"https://jobs.example/{job_id}",
+            "label": "Training job",
+            "metadata": {"queue": "cpu"},
+            "redaction_status": "partial",
+            "started_at": "2026-01-02T03:04:00+00:00",
+            "updated_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+            "completed_at": (
+                f"2026-01-02T03:04:{sequence:02d}+00:00"
+                if status in {"completed", "failed", "cancelled"}
+                else None
+            ),
+        },
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
+def make_artifact_ref_recorded_event(
+    *,
+    sequence: int,
+    artifact_id: str = "artifact-1",
+    label: str = "Best checkpoint",
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    return make_event(
+        sequence=sequence,
+        event_type=ARTIFACT_REF_RECORDED_EVENT,
+        session_id=session_id,
+        data={
+            "session_id": session_id,
+            "artifact_id": artifact_id,
+            "source_event_sequence": source_event_sequence or sequence,
+            "type": "model_checkpoint",
+            "source": "job",
+            "source_tool_call_id": "tc-1",
+            "source_job_id": "active-job-1",
+            "path": f"/tmp/{artifact_id}.pt",
+            "uri": f"file:///tmp/{artifact_id}.pt",
+            "digest": f"sha256:{artifact_id}",
+            "label": label,
+            "metadata": {"epoch": sequence},
+            "privacy_class": "private",
+            "redaction_status": "none",
+            "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        },
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
 
 
 def test_plan_update_projects_latest_plan_items():
@@ -167,6 +240,148 @@ def test_tool_events_project_active_job_lifecycle():
 
     assert completed.active_jobs == []
     assert completed.status == "completed"
+
+
+def test_active_job_recorded_projects_active_job_refs_in_workflow_state():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[make_active_job_recorded_event(sequence=1)],
+    )
+
+    assert state.status == "processing"
+    assert state.active_jobs == [
+        {
+            "source": "event",
+            "session_id": "session-a",
+            "job_id": "active-job-1",
+            "source_event_sequence": 1,
+            "tool_call_id": "tc-1",
+            "tool": "hf_jobs",
+            "provider": "huggingface_jobs",
+            "status": "running",
+            "url": "https://jobs.example/active-job-1",
+            "label": "Training job",
+            "metadata": {"queue": "cpu"},
+            "redaction_status": "partial",
+            "started_at": "2026-01-02T03:04:00+00:00",
+            "updated_at": "2026-01-02T03:04:01+00:00",
+        }
+    ]
+
+
+def test_terminal_active_job_recorded_does_not_show_in_active_jobs():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_active_job_recorded_event(sequence=1, status="running"),
+            make_active_job_recorded_event(sequence=2, status="completed"),
+        ],
+    )
+
+    assert state.active_jobs == []
+    assert state.status == "idle"
+
+
+def test_artifact_ref_recorded_projects_explicit_refs_into_evidence_summary():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_artifact_ref_recorded_event(
+                sequence=1,
+                artifact_id="artifact-1",
+                label="Initial checkpoint",
+            ),
+            make_artifact_ref_recorded_event(
+                sequence=2,
+                artifact_id="artifact-2",
+                label="Metrics",
+            ),
+        ],
+    )
+
+    assert state.evidence_summary["source"] == "event"
+    assert state.evidence_summary["status"] == "available"
+    assert state.evidence_summary["artifact_count"] == 2
+    assert state.evidence_summary["claim_count"] == 0
+    assert state.evidence_summary["metric_count"] == 0
+    assert [
+        (item["artifact_id"], item["label"], item["source"])
+        for item in state.evidence_summary["items"]
+    ] == [
+        ("artifact-1", "Initial checkpoint", "job"),
+        ("artifact-2", "Metrics", "job"),
+    ]
+
+
+def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_active_job_recorded_event(
+                sequence=1,
+                job_id="active-job-b",
+                session_id="session-b",
+            ),
+            make_artifact_ref_recorded_event(
+                sequence=2,
+                artifact_id="artifact-b",
+                session_id="session-b",
+            ),
+        ],
+    )
+
+    assert state.active_jobs == []
+    assert state.evidence_summary == {
+        "source": "placeholder",
+        "status": "placeholder",
+        "claim_count": 0,
+        "artifact_count": 0,
+        "metric_count": 0,
+        "items": [],
+    }
+    assert state.compatibility.stale is True
+
+
+def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic():
+    initial_job = make_active_job_recorded_event(
+        sequence=1,
+        job_id="active-job-1",
+        status="queued",
+    )
+    latest_job = make_active_job_recorded_event(
+        sequence=2,
+        job_id="active-job-1",
+        status="running",
+    )
+    initial_artifact = make_artifact_ref_recorded_event(
+        sequence=3,
+        artifact_id="artifact-1",
+        label="Initial checkpoint",
+    )
+    latest_artifact = make_artifact_ref_recorded_event(
+        sequence=4,
+        artifact_id="artifact-1",
+        label="Final checkpoint",
+    )
+
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            initial_artifact,
+            latest_job,
+            initial_job,
+            latest_artifact,
+            latest_job.model_copy(),
+            latest_artifact.model_copy(),
+        ],
+    )
+
+    assert len(state.active_jobs) == 1
+    assert state.active_jobs[0]["job_id"] == "active-job-1"
+    assert state.active_jobs[0]["status"] == "running"
+    assert state.evidence_summary["artifact_count"] == 1
+    assert state.evidence_summary["items"][0]["artifact_id"] == "artifact-1"
+    assert state.evidence_summary["items"][0]["label"] == "Final checkpoint"
 
 
 def test_turn_complete_clears_event_pending_approvals_and_marks_completed():
