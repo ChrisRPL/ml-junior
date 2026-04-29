@@ -763,7 +763,7 @@ async def _handle_slash_command(
     arg = parsed.arguments
 
     if not parsed.spec.implemented:
-        print(f"{command} is not implemented yet.")
+        print(parsed.spec.planned_message)
         return None
 
     if command == "/help":

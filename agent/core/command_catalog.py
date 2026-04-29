@@ -5,65 +5,125 @@ from __future__ import annotations
 from typing import Any
 
 
+REQUIRED_BACKEND_CAPABILITIES = {
+    "/help": "cli.help",
+    "/undo": "session.undo",
+    "/compact": "session.context_compaction",
+    "/model": "session.model_selection",
+    "/effort": "session.reasoning_effort",
+    "/yolo": "session.approval_mode",
+    "/status": "project.snapshot_read",
+    "/quit": "cli.exit",
+    "/new": "project.workspace_create",
+    "/open": "project.workspace_open",
+    "/handoff": "project.handoff_summary",
+    "/export": "project.export",
+    "/doctor": "project.diagnostics",
+    "/flows": "flow.template_catalog_read",
+    "/flow preview": "flow.template_preview_read",
+    "/flow start": "flow.run_start",
+    "/flow pause": "flow.run_pause",
+    "/flow resume": "flow.run_resume",
+    "/flow fork": "flow.run_fork",
+    "/phase": "workflow.phase_state",
+    "/plan": "workflow.plan_state",
+    "/experiments": "experiment.board_state",
+    "/runs": "experiment.run_index",
+    "/run show": "experiment.run_detail",
+    "/run compare": "experiment.run_compare",
+    "/run fork": "experiment.run_fork",
+    "/metrics": "experiment.metrics_read",
+    "/artifacts": "artifact.index_read",
+    "/tools": "tool.catalog_read",
+    "/jobs": "job.status_read",
+    "/approve": "approval.decision_record",
+    "/deny": "approval.decision_record",
+    "/permissions": "policy.permissions_manage",
+    "/budget": "budget.controls",
+    "/evidence": "evidence.search",
+    "/decisions": "decision.log_read",
+    "/assumptions": "assumption.registry_read",
+    "/memory": "memory.project_read",
+    "/ledger": "ledger.read",
+    "/ledger verify": "ledger.verify",
+    "/proof bundle": "proof.bundle_create",
+    "/diff": "workspace.diff_read",
+    "/test": "test.runner",
+    "/rollback": "workspace.rollback",
+    "/commit": "vcs.commit_prepare",
+    "/pr": "vcs.pr_prepare",
+    "/data snapshot": "data.snapshot_create",
+    "/data diff": "data.snapshot_compare",
+    "/eval": "evaluation.run",
+    "/package": "package.build",
+}
+
+
 def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
     """Build command specs without keeping the large catalog in parser code."""
 
     CommandSpec = command_spec
+    def spec(**kwargs: Any) -> Any:
+        return CommandSpec(
+            required_backend_capability=REQUIRED_BACKEND_CAPABILITIES[kwargs["name"]],
+            **kwargs,
+        )
+
     return (
-        CommandSpec(
+        spec(
             name="/help",
             description="Show this help",
             risk_level="safe",
             mutates_state=False,
         ),
-        CommandSpec(
+        spec(
             name="/undo",
             description="Undo last turn",
             risk_level="medium",
             mutates_state=True,
         ),
-        CommandSpec(
+        spec(
             name="/compact",
             description="Compact context window",
             risk_level="medium",
             mutates_state=True,
             group="evidence",
         ),
-        CommandSpec(
+        spec(
             name="/model",
             description="Show available models or switch",
             arguments="[id]",
             risk_level="low",
             mutates_state=True,
         ),
-        CommandSpec(
+        spec(
             name="/effort",
             description="Reasoning effort (minimal|low|medium|high|xhigh|max|off)",
             arguments="[level]",
             risk_level="low",
             mutates_state=True,
         ),
-        CommandSpec(
+        spec(
             name="/yolo",
             description="Toggle auto-approve mode",
             risk_level="high",
             mutates_state=True,
         ),
-        CommandSpec(
+        spec(
             name="/status",
             description="Current model, effort, and turn count",
             risk_level="safe",
             mutates_state=False,
             group="project",
         ),
-        CommandSpec(
+        spec(
             name="/quit",
             description="Exit",
             risk_level="safe",
             mutates_state=False,
             aliases=("/exit", "quit", "exit"),
         ),
-        CommandSpec(
+        spec(
             name="/new",
             description="Create a project workspace",
             arguments="<name|path>",
@@ -72,7 +132,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="project",
         ),
-        CommandSpec(
+        spec(
             name="/open",
             description="Open an existing project workspace",
             arguments="<path>",
@@ -81,7 +141,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="project",
         ),
-        CommandSpec(
+        spec(
             name="/handoff",
             description="Prepare a project handoff summary",
             arguments="[path]",
@@ -90,7 +150,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="project",
         ),
-        CommandSpec(
+        spec(
             name="/export",
             description="Export project state or reports",
             arguments="[target]",
@@ -99,7 +159,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="project",
         ),
-        CommandSpec(
+        spec(
             name="/doctor",
             description="Run environment diagnostics",
             risk_level="low",
@@ -107,14 +167,14 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="project",
         ),
-        CommandSpec(
+        spec(
             name="/flows",
             description="List saved flows and flow commands",
             risk_level="safe",
             mutates_state=False,
             group="flow",
         ),
-        CommandSpec(
+        spec(
             name="/flow preview",
             description="Preview a flow before running it",
             arguments="<id>",
@@ -122,7 +182,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             mutates_state=False,
             group="flow",
         ),
-        CommandSpec(
+        spec(
             name="/flow start",
             description="Start a flow",
             arguments="<flow>",
@@ -131,7 +191,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="flow",
         ),
-        CommandSpec(
+        spec(
             name="/flow pause",
             description="Pause the active flow",
             arguments="[id]",
@@ -140,7 +200,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="flow",
         ),
-        CommandSpec(
+        spec(
             name="/flow resume",
             description="Resume a paused flow",
             arguments="[id]",
@@ -149,7 +209,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="flow",
         ),
-        CommandSpec(
+        spec(
             name="/flow fork",
             description="Fork a flow from an existing run",
             arguments="<id> [name]",
@@ -158,7 +218,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="flow",
         ),
-        CommandSpec(
+        spec(
             name="/phase",
             description="Show or switch the current project phase",
             arguments="[name]",
@@ -167,7 +227,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="flow",
         ),
-        CommandSpec(
+        spec(
             name="/plan",
             description="Create or inspect an execution plan",
             arguments="[goal]",
@@ -176,7 +236,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="flow",
         ),
-        CommandSpec(
+        spec(
             name="/experiments",
             description="Manage experiment flags",
             arguments="[name] [on|off]",
@@ -185,7 +245,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="experiment",
         ),
-        CommandSpec(
+        spec(
             name="/runs",
             description="List experiment runs",
             arguments="[filter]",
@@ -194,7 +254,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="experiment",
         ),
-        CommandSpec(
+        spec(
             name="/run show",
             description="Show run details",
             arguments="[id]",
@@ -203,7 +263,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="experiment",
         ),
-        CommandSpec(
+        spec(
             name="/run compare",
             description="Compare two runs",
             arguments="<left> <right>",
@@ -212,7 +272,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="experiment",
         ),
-        CommandSpec(
+        spec(
             name="/run fork",
             description="Fork a run configuration",
             arguments="<id>",
@@ -221,7 +281,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="experiment",
         ),
-        CommandSpec(
+        spec(
             name="/metrics",
             description="Show run metrics",
             arguments="[run]",
@@ -230,7 +290,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="experiment",
         ),
-        CommandSpec(
+        spec(
             name="/artifacts",
             description="List or inspect run artifacts",
             arguments="[id]",
@@ -239,7 +299,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="experiment",
         ),
-        CommandSpec(
+        spec(
             name="/tools",
             description="List available tools",
             arguments="[filter]",
@@ -248,7 +308,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="tools",
         ),
-        CommandSpec(
+        spec(
             name="/jobs",
             description="List background jobs",
             arguments="[filter]",
@@ -257,7 +317,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="tools",
         ),
-        CommandSpec(
+        spec(
             name="/approve",
             description="Approve a pending action",
             arguments="<id>",
@@ -266,7 +326,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="tools",
         ),
-        CommandSpec(
+        spec(
             name="/deny",
             description="Deny a pending action",
             arguments="<id>",
@@ -275,7 +335,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="tools",
         ),
-        CommandSpec(
+        spec(
             name="/permissions",
             description="Show or adjust tool permissions",
             arguments="[scope]",
@@ -284,7 +344,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="tools",
         ),
-        CommandSpec(
+        spec(
             name="/budget",
             description="Show or set budget controls",
             arguments="[limit]",
@@ -293,7 +353,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="tools",
         ),
-        CommandSpec(
+        spec(
             name="/evidence",
             description="Search evidence records",
             arguments="[query]",
@@ -302,7 +362,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="evidence",
         ),
-        CommandSpec(
+        spec(
             name="/decisions",
             description="List recorded decisions",
             arguments="[query]",
@@ -311,7 +371,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="evidence",
         ),
-        CommandSpec(
+        spec(
             name="/assumptions",
             description="List tracked assumptions",
             arguments="[query]",
@@ -320,7 +380,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="evidence",
         ),
-        CommandSpec(
+        spec(
             name="/memory",
             description="Inspect saved memory",
             arguments="[query]",
@@ -329,7 +389,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="evidence",
         ),
-        CommandSpec(
+        spec(
             name="/ledger",
             description="Inspect the project ledger",
             arguments="[query]",
@@ -338,7 +398,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="evidence",
         ),
-        CommandSpec(
+        spec(
             name="/ledger verify",
             description="Verify ledger integrity",
             arguments="[bundle]",
@@ -347,7 +407,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="evidence",
         ),
-        CommandSpec(
+        spec(
             name="/proof bundle",
             description="Create a proof bundle",
             arguments="[run]",
@@ -356,7 +416,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="evidence",
         ),
-        CommandSpec(
+        spec(
             name="/diff",
             description="Show code or workspace diffs",
             arguments="[target]",
@@ -365,7 +425,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="code",
         ),
-        CommandSpec(
+        spec(
             name="/test",
             description="Run tests",
             arguments="[selector]",
@@ -374,7 +434,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="code",
         ),
-        CommandSpec(
+        spec(
             name="/rollback",
             description="Roll back a change or run",
             arguments="<target>",
@@ -383,7 +443,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="code",
         ),
-        CommandSpec(
+        spec(
             name="/commit",
             description="Prepare a commit",
             arguments="[message]",
@@ -392,7 +452,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="code",
         ),
-        CommandSpec(
+        spec(
             name="/pr",
             description="Prepare a pull request",
             arguments="[title]",
@@ -401,7 +461,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="code",
         ),
-        CommandSpec(
+        spec(
             name="/data snapshot",
             description="Create a data snapshot",
             arguments="[name]",
@@ -410,7 +470,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="code",
         ),
-        CommandSpec(
+        spec(
             name="/data diff",
             description="Compare data snapshots",
             arguments="<left> <right>",
@@ -419,7 +479,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="code",
         ),
-        CommandSpec(
+        spec(
             name="/eval",
             description="Run an evaluation suite",
             arguments="[suite]",
@@ -428,7 +488,7 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             implemented=False,
             group="code",
         ),
-        CommandSpec(
+        spec(
             name="/package",
             description="Build a package artifact",
             arguments="[target]",

@@ -92,6 +92,7 @@ def test_mutating_flow_commands_remain_planned() -> None:
     for name in {"/flow start", "/flow pause", "/flow resume", "/flow fork"}:
         assert registry[name].implemented is False
         assert registry[name].mutates_state is True
+        assert registry[name].required_backend_capability.startswith("flow.run_")
 
 
 async def test_main_handler_dispatches_read_only_flow_commands(monkeypatch, capsys) -> None:
@@ -127,7 +128,11 @@ async def test_main_handler_dispatches_read_only_flow_commands(monkeypatch, caps
 
     assert result is None
     assert calls == [("/flow preview", "fine-tune-model")]
-    assert "/flow start is not implemented yet." in capsys.readouterr().out
+    assert (
+        "/flow start is not available yet; requires backend capability "
+        "`flow.run_start`."
+        in capsys.readouterr().out
+    )
 
 
 def test_backend_import_unavailable_reports_packaging_boundary(monkeypatch) -> None:

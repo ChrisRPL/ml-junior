@@ -200,7 +200,10 @@ def _completion_text(spec: CommandSpec) -> str:
 
 def _display_meta(spec: CommandSpec) -> str:
     state = "mutates state" if spec.mutates_state else "read-only"
-    return f"{spec.group} | {spec.status} | {spec.risk_level} risk | {state}"
+    return (
+        f"{spec.group} | {spec.status} | {spec.risk_level} risk | {state} | "
+        f"requires: {spec.required_backend_capability}"
+    )
 
 
 def _candidate_names(spec: CommandSpec) -> tuple[str, ...]:

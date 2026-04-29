@@ -61,8 +61,11 @@ def test_slash_completion_preserves_command_metadata_for_planned_commands() -> N
     assert rows[0].spec.group == "evidence"
     assert rows[0].spec.risk_level == "low"
     assert rows[0].spec.mutates_state is False
+    assert rows[0].spec.required_backend_capability == "ledger.verify"
     assert rows[0].display == "/ledger verify [bundle]"
-    assert rows[0].display_meta == "evidence | planned | low risk | read-only"
+    assert rows[0].display_meta == (
+        "evidence | planned | low risk | read-only | requires: ledger.verify"
+    )
     assert rows[0].text == "/ledger verify "
 
 
@@ -90,5 +93,6 @@ def test_prompt_toolkit_adapter_uses_pure_completion_rows() -> None:
     ]
     assert completions[0].start_position == len("/flow p") * -1
     assert to_plain_text(completions[0].display_meta) == (
-        "flow | implemented | low risk | read-only"
+        "flow | implemented | low risk | read-only | "
+        "requires: flow.template_preview_read"
     )

@@ -78,6 +78,14 @@ IMPLEMENTED_COMMANDS = {
     "/flow preview",
 }
 
+PRIORITY_BACKEND_CAPABILITIES = {
+    "/status": "project.snapshot_read",
+    "/phase": "workflow.phase_state",
+    "/runs": "experiment.run_index",
+    "/evidence": "evidence.search",
+    "/handoff": "project.handoff_summary",
+}
+
 
 def _registry_by_name():
     return {command.name: command for command in COMMAND_REGISTRY}
@@ -95,6 +103,8 @@ def test_registry_contains_required_metadata():
         assert isinstance(command.mutates_state, bool)
         assert command.group
         assert command.status in {"implemented", "planned"}
+        assert command.required_backend_capability
+        assert "." in command.required_backend_capability
 
 
 def test_registry_groups_required_catalog_entries():
@@ -120,28 +130,43 @@ def test_backlog_commands_are_planned_except_existing_runtime_commands():
         assert registry[name].status == "implemented"
 
 
+def test_priority_commands_have_backend_capability_metadata():
+    registry = _registry_by_name()
+
+    for name, capability in PRIORITY_BACKEND_CAPABILITIES.items():
+        assert registry[name].required_backend_capability == capability
+
+
 def test_parse_exact_command_with_arguments():
-    parsed = parse_slash_command("/flow preview configs/demo.yaml")
+    parsed = parse_slash_command("/flow preview tests/fixtures/flow-template.json")
 
     assert parsed.spec is not None
     assert parsed.spec.name == "/flow preview"
     assert parsed.command_text == "/flow preview"
-    assert parsed.arguments == "configs/demo.yaml"
+    assert parsed.arguments == "tests/fixtures/flow-template.json"
     assert parsed.suggestions == ()
 
 
 def test_parse_planned_subcommands_with_longest_match():
-    parsed = parse_slash_command("/run compare baseline candidate --metric loss")
+    parsed = parse_slash_command(
+        "/run compare tests/fixtures/runs/left tests/fixtures/runs/right --metric loss"
+    )
 
     assert parsed.spec is not None
     assert parsed.spec.name == "/run compare"
     assert parsed.command_text == "/run compare"
-    assert parsed.arguments == "baseline candidate --metric loss"
+    assert parsed.arguments == (
+        "tests/fixtures/runs/left tests/fixtures/runs/right --metric loss"
+    )
 
-    data_parsed = parse_slash_command("/data diff train-v1 train-v2")
+    data_parsed = parse_slash_command(
+        "/data diff tests/fixtures/snapshots/train-v1 tests/fixtures/snapshots/train-v2"
+    )
     assert data_parsed.spec is not None
     assert data_parsed.spec.name == "/data diff"
-    assert data_parsed.arguments == "train-v1 train-v2"
+    assert data_parsed.arguments == (
+        "tests/fixtures/snapshots/train-v1 tests/fixtures/snapshots/train-v2"
+    )
 
 
 def test_parse_unknown_command_preserves_unknown_token_and_suggests():
@@ -177,9 +202,11 @@ def test_planned_command_parse_supports_existing_cli_response():
     assert parsed.spec is not None
     assert parsed.spec.name == "/ledger verify"
     assert parsed.spec.implemented is False
-    assert f"{parsed.spec.name} is not implemented yet." == (
-        "/ledger verify is not implemented yet."
+    assert parsed.spec.planned_message == (
+        "/ledger verify is not available yet; requires backend capability "
+        "`ledger.verify`."
     )
+    assert "not implemented" not in parsed.spec.planned_message
 
 
 def test_help_text_is_generated_from_registry_metadata():
@@ -189,4 +216,5 @@ def test_help_text_is_generated_from_registry_metadata():
     assert "[cyan]/flow preview <id>[/cyan]" in help_text
     assert "[cyan]/ledger verify [bundle][/cyan]" in help_text
     assert "Run environment diagnostics" in help_text
+    assert "requires: project.snapshot_read" in help_text
     assert "[dim](planned)[/dim]" in help_text

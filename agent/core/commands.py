@@ -21,6 +21,7 @@ class CommandSpec:
     aliases: tuple[str, ...] = ()
     implemented: bool = True
     group: str = "core"
+    required_backend_capability: str = "cli.local"
 
     @property
     def usage(self) -> str:
@@ -29,6 +30,13 @@ class CommandSpec:
     @property
     def status(self) -> str:
         return "implemented" if self.implemented else "planned"
+
+    @property
+    def planned_message(self) -> str:
+        return (
+            f"{self.name} is not available yet; requires backend capability "
+            f"`{self.required_backend_capability}`."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +169,7 @@ def format_command_help(
         planned = " [dim](planned)[/dim]" if not entry.implemented else ""
         lines.append(
             f"{indent}  [cyan]{entry.usage}[/cyan]{padding}"
-            f"{entry.description}{planned}"
+            f"{entry.description}{planned} "
+            f"[dim]requires: {entry.required_backend_capability}[/dim]"
         )
     return "\n".join(lines)
