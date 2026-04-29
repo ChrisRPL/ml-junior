@@ -163,6 +163,142 @@ class WorkflowState(BaseModel):
     updated_at: str | None = None
 
 
+class FlowTemplateMetadata(BaseModel):
+    """Derived catalog metadata for a built-in flow template."""
+
+    category: str
+    tags: list[str]
+    runtime_class: str
+
+
+class FlowTemplateSourceMetadata(BaseModel):
+    """Source metadata for a built-in flow template."""
+
+    kind: Literal["builtin"]
+    path: str
+    schema_version: str
+    template_version: str
+
+
+class FlowCatalogItem(BaseModel):
+    """Read-only flow catalog entry."""
+
+    id: str
+    name: str
+    version: str
+    description: str | None = None
+    metadata: FlowTemplateMetadata
+    template_source: FlowTemplateSourceMetadata
+    phase_count: int
+    required_inputs: list[str]
+    approval_point_count: int
+    verifier_count: int
+
+
+class FlowInputPreview(BaseModel):
+    """Flow template input preview."""
+
+    id: str
+    type: str
+    required: bool = False
+    default: Any | None = None
+    description: str | None = None
+
+
+class FlowBudgetsPreview(BaseModel):
+    """Flow template budget preview."""
+
+    max_gpu_hours: float | None = None
+    max_runs: int | None = None
+    max_wall_clock_hours: float | None = None
+    max_llm_usd: float | None = None
+
+
+class FlowPhasePreview(BaseModel):
+    """Flow template phase preview."""
+
+    id: str
+    name: str
+    objective: str
+    status: str
+    order: int
+    required_outputs: list[str]
+    approval_points: list[str]
+    verifiers: list[str]
+
+
+class FlowApprovalPointPreview(BaseModel):
+    """Approval point preview with phase references."""
+
+    id: str
+    risk: str
+    action: str
+    target: str
+    description: str | None = None
+    phase_ids: list[str]
+
+
+class FlowRequiredOutputPreview(BaseModel):
+    """Required output preview with phase references."""
+
+    id: str
+    type: str
+    description: str | None = None
+    required: bool = True
+    phase_ids: list[str]
+
+
+class FlowArtifactPreview(BaseModel):
+    """Expected artifact preview."""
+
+    id: str
+    type: str
+    description: str | None = None
+    required: bool = True
+
+
+class FlowVerifierCheckPreview(BaseModel):
+    """Verifier check preview with phase references."""
+
+    id: str
+    type: str
+    description: str
+    required: bool = True
+    phase_ids: list[str]
+
+
+class FlowRiskyOperationPreview(BaseModel):
+    """Risk-labeled operation surfaced before a flow can start."""
+
+    id: str
+    risk: str
+    action: str
+    target: str
+    description: str | None = None
+    source: Literal["approval_point"]
+    phase_ids: list[str]
+
+
+class FlowPreviewResponse(BaseModel):
+    """Read-only flow preview response."""
+
+    id: str
+    name: str
+    version: str
+    description: str | None = None
+    metadata: FlowTemplateMetadata
+    template_source: FlowTemplateSourceMetadata
+    inputs: list[FlowInputPreview]
+    required_inputs: list[FlowInputPreview]
+    budgets: FlowBudgetsPreview
+    phases: list[FlowPhasePreview]
+    approval_points: list[FlowApprovalPointPreview]
+    required_outputs: list[FlowRequiredOutputPreview]
+    artifacts: list[FlowArtifactPreview]
+    verifier_checks: list[FlowVerifierCheckPreview]
+    risky_operations: list[FlowRiskyOperationPreview]
+
+
 class PendingApprovalTool(BaseModel):
     """A tool waiting for user approval."""
 

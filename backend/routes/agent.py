@@ -21,6 +21,8 @@ from fastapi.responses import StreamingResponse
 from litellm import acompletion
 from models import (
     ApprovalRequest,
+    FlowCatalogItem,
+    FlowPreviewResponse,
     HealthResponse,
     LLMHealthResponse,
     OperationResponse,
@@ -29,6 +31,13 @@ from models import (
     SubmitRequest,
     TruncateRequest,
     WorkflowState,
+)
+from backend.flow_templates import (
+    FlowTemplateNotFoundError,
+    build_flow_catalog_item,
+    build_flow_preview,
+    get_builtin_flow_template,
+    list_builtin_flow_templates,
 )
 from session_manager import (
     MAX_SESSIONS,
@@ -268,6 +277,37 @@ async def get_model() -> dict:
         "current": session_manager.config.model_name,
         "available": AVAILABLE_MODELS,
     }
+
+
+@router.get("/flows", response_model=list[FlowCatalogItem])
+async def list_flows(
+    _user: dict = Depends(get_current_user),
+) -> list[FlowCatalogItem]:
+    """Return the read-only built-in flow catalog."""
+    return [
+        FlowCatalogItem(**build_flow_catalog_item(template))
+        for template in list_builtin_flow_templates()
+    ]
+
+
+@router.get("/flows/{template_id}/preview", response_model=FlowPreviewResponse)
+async def get_flow_preview(
+    template_id: str,
+    _user: dict = Depends(get_current_user),
+) -> FlowPreviewResponse:
+    """Return a read-only preview for one built-in flow template."""
+    try:
+        template = get_builtin_flow_template(template_id)
+    except FlowTemplateNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "flow_template_not_found",
+                "template_id": template_id,
+                "message": str(exc),
+            },
+        ) from exc
+    return FlowPreviewResponse(**build_flow_preview(template))
 
 
 _TITLE_STRIP_CHARS = str.maketrans("", "", "`*_~#[]()")
