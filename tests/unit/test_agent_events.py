@@ -390,6 +390,227 @@ def _valid_experiment_run_recorded_payload() -> dict:
     }
 
 
+def _valid_dataset_snapshot_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "snapshot_id": " dataset-1 ",
+        "source_event_sequence": 6,
+        "source": "dataset_registry",
+        "dataset_id": " dataset-main ",
+        "name": " Training Set ",
+        "path": " /tmp/data ",
+        "uri": " file:///tmp/data ",
+        "split": " train ",
+        "revision": " v1 ",
+        "schema": {"columns": [{"name": "text", "type": "string"}]},
+        "sample_count": 42,
+        "library_fingerprint": " datasets:4.4.1 ",
+        "manifest_hash": " sha256:manifest ",
+        "license": " mit ",
+        "lineage_refs": [{"event_id": "event-1"}],
+        "diff_refs": [{"snapshot_id": "dataset-0"}],
+        "privacy_class": "private",
+        "redaction_status": "partial",
+        "created_at": " 2026-04-29T10:01:00Z ",
+    }
+
+
+def _valid_code_snapshot_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "snapshot_id": " code-1 ",
+        "source_event_sequence": 7,
+        "source": "git",
+        "repo": " example/repo ",
+        "path": " /tmp/repo ",
+        "uri": " https://example.test/repo.git ",
+        "git_commit": " abcdef123456 ",
+        "git_ref": " main ",
+        "diff_hash": " sha256:diff ",
+        "changed_files": [" agent/core/events.py ", " backend/models.py "],
+        "generated_artifact_refs": [{"artifact_id": "artifact-1"}],
+        "manifest_hash": " sha256:manifest ",
+        "digest": " sha256:digest ",
+        "privacy_class": "private",
+        "redaction_status": "none",
+        "created_at": " 2026-04-29T10:02:00Z ",
+    }
+
+
+def test_dataset_snapshot_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=9,
+        event_type="dataset_snapshot.recorded",
+        data=_valid_dataset_snapshot_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["snapshot_id"] == "dataset-1"
+    assert event.data["dataset_id"] == "dataset-main"
+    assert event.data["name"] == "Training Set"
+    assert event.data["path"] == "/tmp/data"
+    assert event.data["schema"] == {"columns": [{"name": "text", "type": "string"}]}
+    assert event.data["created_at"] == "2026-04-29T10:01:00Z"
+
+
+def test_code_snapshot_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=10,
+        event_type="code_snapshot.recorded",
+        data=_valid_code_snapshot_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["snapshot_id"] == "code-1"
+    assert event.data["repo"] == "example/repo"
+    assert event.data["path"] == "/tmp/repo"
+    assert event.data["changed_files"] == [
+        "agent/core/events.py",
+        "backend/models.py",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory"),
+    [
+        ("dataset_snapshot.recorded", _valid_dataset_snapshot_recorded_payload),
+        ("code_snapshot.recorded", _valid_code_snapshot_recorded_payload),
+    ],
+)
+def test_snapshot_recorded_payloads_reject_unknown_top_level_fields(
+    event_type,
+    payload_factory,
+):
+    payload = payload_factory()
+    payload["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=11,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "path"),
+    [
+        (
+            "dataset_snapshot.recorded",
+            _valid_dataset_snapshot_recorded_payload,
+            ("session_id",),
+        ),
+        (
+            "dataset_snapshot.recorded",
+            _valid_dataset_snapshot_recorded_payload,
+            ("snapshot_id",),
+        ),
+        (
+            "dataset_snapshot.recorded",
+            _valid_dataset_snapshot_recorded_payload,
+            ("name",),
+        ),
+        (
+            "code_snapshot.recorded",
+            _valid_code_snapshot_recorded_payload,
+            ("session_id",),
+        ),
+        (
+            "code_snapshot.recorded",
+            _valid_code_snapshot_recorded_payload,
+            ("snapshot_id",),
+        ),
+        (
+            "code_snapshot.recorded",
+            _valid_code_snapshot_recorded_payload,
+            ("changed_files", 0),
+        ),
+    ],
+)
+def test_snapshot_recorded_payloads_reject_empty_required_ids_and_text(
+    event_type,
+    payload_factory,
+    path,
+):
+    payload = payload_factory()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = ""
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=11,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "field", "value"),
+    [
+        (
+            "dataset_snapshot.recorded",
+            _valid_dataset_snapshot_recorded_payload,
+            "source",
+            "ad_hoc",
+        ),
+        (
+            "dataset_snapshot.recorded",
+            _valid_dataset_snapshot_recorded_payload,
+            "privacy_class",
+            "internal",
+        ),
+        (
+            "dataset_snapshot.recorded",
+            _valid_dataset_snapshot_recorded_payload,
+            "redaction_status",
+            "complete",
+        ),
+        (
+            "code_snapshot.recorded",
+            _valid_code_snapshot_recorded_payload,
+            "source",
+            "working_tree",
+        ),
+        (
+            "code_snapshot.recorded",
+            _valid_code_snapshot_recorded_payload,
+            "privacy_class",
+            "internal",
+        ),
+        (
+            "code_snapshot.recorded",
+            _valid_code_snapshot_recorded_payload,
+            "redaction_status",
+            "complete",
+        ),
+    ],
+)
+def test_snapshot_recorded_payloads_reject_invalid_literals(
+    event_type,
+    payload_factory,
+    field,
+    value,
+):
+    payload = payload_factory()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=11,
+            event_type=event_type,
+            data=payload,
+        )
+
+
 def test_experiment_run_recorded_payload_validates_and_normalizes():
     event = AgentEvent(
         session_id="session-a",

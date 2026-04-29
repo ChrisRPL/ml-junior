@@ -226,6 +226,66 @@ class ExperimentCodeSnapshotRefPayload(ExperimentLedgerPayload):
     digest: NonEmptyStr | None = None
 
 
+class DatasetSnapshotRecordedPayload(ExperimentLedgerPayload):
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+    session_id: NonEmptyStr
+    snapshot_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    source: Literal[
+        "dataset_registry",
+        "local_path",
+        "remote_uri",
+        "event_ref",
+        "manual",
+    ]
+    dataset_id: NonEmptyStr | None = None
+    name: NonEmptyStr | None = None
+    path: NonEmptyStr | None = None
+    uri: NonEmptyStr | None = None
+    split: NonEmptyStr | None = None
+    revision: NonEmptyStr | None = None
+    dataset_schema: dict[str, Any] | None = Field(default=None, alias="schema")
+    sample_count: int | None = Field(default=None, ge=0)
+    library_fingerprint: NonEmptyStr | None = None
+    manifest_hash: NonEmptyStr | None = None
+    license: NonEmptyStr | None = None
+    lineage_refs: list[dict[str, Any]] = Field(default_factory=list)
+    diff_refs: list[dict[str, Any]] = Field(default_factory=list)
+    privacy_class: Literal["public", "private", "sensitive", "unknown"]
+    redaction_status: Literal["none", "partial", "redacted"]
+    created_at: NonEmptyStr | None = None
+
+    @property
+    def schema(self) -> dict[str, Any] | None:
+        return self.dataset_schema
+
+
+class CodeSnapshotRecordedPayload(ExperimentLedgerPayload):
+    session_id: NonEmptyStr
+    snapshot_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    source: Literal["git", "archive", "local_path", "remote_uri", "event_ref", "manual"]
+    repo: NonEmptyStr | None = None
+    path: NonEmptyStr | None = None
+    uri: NonEmptyStr | None = None
+    git_commit: NonEmptyStr | None = None
+    git_ref: NonEmptyStr | None = None
+    diff_hash: NonEmptyStr | None = None
+    changed_files: list[NonEmptyStr] = Field(default_factory=list)
+    generated_artifact_refs: list[dict[str, Any]] = Field(default_factory=list)
+    manifest_hash: NonEmptyStr | None = None
+    digest: NonEmptyStr | None = None
+    privacy_class: Literal["public", "private", "sensitive", "unknown"]
+    redaction_status: Literal["none", "partial", "redacted"]
+    created_at: NonEmptyStr | None = None
+
+
 class ExperimentMetricRecordPayload(ExperimentLedgerPayload):
     name: NonEmptyStr
     value: int | float | str | bool
@@ -335,6 +395,8 @@ EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
     "checkpoint.created": CheckpointCreatedPayload,
     "fork_point.created": ForkPointCreatedPayload,
     "handoff.summary_created": HandoffSummaryCreatedPayload,
+    "dataset_snapshot.recorded": DatasetSnapshotRecordedPayload,
+    "code_snapshot.recorded": CodeSnapshotRecordedPayload,
     "experiment.run_recorded": ExperimentRunRecordedPayload,
 }
 
