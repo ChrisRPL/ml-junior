@@ -23,6 +23,7 @@ from prompt_toolkit import PromptSession
 from agent.config import load_config
 from agent.core.commands import parse_slash_command
 from agent.core.agent_loop import submission_loop
+from agent.core.flow_commands import FlowCommandError, render_flow_command
 from agent.core import model_switcher
 from agent.core.session import OpType
 from agent.core.tools import ToolRouter
@@ -848,6 +849,13 @@ async def _handle_slash_command(
         if session:
             print(f"Turns: {session.turn_count}")
             print(f"Context items: {len(session.context_manager.items)}")
+        return None
+
+    if command in {"/flows", "/flow preview"}:
+        try:
+            print(render_flow_command(command, arg))
+        except FlowCommandError as exc:
+            print(str(exc))
         return None
 
     print(f"Unknown command: {command}. Type /help for available commands.")

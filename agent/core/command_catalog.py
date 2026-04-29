@@ -112,16 +112,14 @@ def build_command_registry(command_spec: type[Any]) -> tuple[Any, ...]:
             description="List saved flows and flow commands",
             risk_level="safe",
             mutates_state=False,
-            implemented=False,
             group="flow",
         ),
         CommandSpec(
             name="/flow preview",
             description="Preview a flow before running it",
-            arguments="<flow>",
+            arguments="<id>",
             risk_level="low",
             mutates_state=False,
-            implemented=False,
             group="flow",
         ),
         CommandSpec(

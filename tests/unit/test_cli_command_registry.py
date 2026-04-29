@@ -74,6 +74,8 @@ IMPLEMENTED_COMMANDS = {
     "/yolo",
     "/status",
     "/quit",
+    "/flows",
+    "/flow preview",
 }
 
 
@@ -184,7 +186,7 @@ def test_help_text_is_generated_from_registry_metadata():
     help_text = format_command_help()
 
     assert "[cyan]/help[/cyan]" in help_text
-    assert "[cyan]/flow preview <flow>[/cyan]" in help_text
+    assert "[cyan]/flow preview <id>[/cyan]" in help_text
     assert "[cyan]/ledger verify [bundle][/cyan]" in help_text
     assert "Run environment diagnostics" in help_text
     assert "[dim](planned)[/dim]" in help_text

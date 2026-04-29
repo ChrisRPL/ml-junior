@@ -56,7 +56,10 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["agent*"]
+include = ["agent*", "backend*"]
+
+[tool.setuptools.package-data]
+backend = ["builtin_flow_templates/*.json"]
 
 [tool.uv]
 package = true
