@@ -2,13 +2,13 @@
  * Lightweight localStorage persistence for UIMessage arrays,
  * keyed by session ID.
  *
- * Uses the same storage namespace (`hf-agent-messages`) that the
- * old Zustand-based store used, so existing data is compatible.
+ * Uses an ML Junior storage namespace so upstream ml-intern browser caches do
+ * not appear as current project data.
  */
 import type { UIMessage } from 'ai';
 import { logger } from '@/utils/logger';
 
-const STORAGE_KEY = 'hf-agent-messages';
+const STORAGE_KEY = 'ml-junior-messages';
 const MAX_SESSIONS = 50;
 
 type MessagesMap = Record<string, UIMessage[]>;

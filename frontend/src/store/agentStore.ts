@@ -220,7 +220,7 @@ function syncSnapshot(
 // Load persisted tool errors from localStorage
 function loadToolErrors(): Record<string, boolean> {
   try {
-    const stored = localStorage.getItem('hf-agent-tool-errors');
+    const stored = localStorage.getItem('ml-junior-tool-errors');
     return stored ? JSON.parse(stored) : {};
   } catch {
     return {};
@@ -230,7 +230,7 @@ function loadToolErrors(): Record<string, boolean> {
 // Save tool errors to localStorage
 function saveToolErrors(errors: Record<string, boolean>): void {
   try {
-    localStorage.setItem('hf-agent-tool-errors', JSON.stringify(errors));
+    localStorage.setItem('ml-junior-tool-errors', JSON.stringify(errors));
   } catch (e) {
     console.warn('Failed to persist tool errors:', e);
   }
@@ -239,7 +239,7 @@ function saveToolErrors(errors: Record<string, boolean>): void {
 // Load persisted rejected tools from localStorage
 function loadRejectedTools(): Record<string, boolean> {
   try {
-    const stored = localStorage.getItem('hf-agent-rejected-tools');
+    const stored = localStorage.getItem('ml-junior-rejected-tools');
     return stored ? JSON.parse(stored) : {};
   } catch {
     return {};
@@ -249,7 +249,7 @@ function loadRejectedTools(): Record<string, boolean> {
 // Save rejected tools to localStorage
 function saveRejectedTools(rejected: Record<string, boolean>): void {
   try {
-    localStorage.setItem('hf-agent-rejected-tools', JSON.stringify(rejected));
+    localStorage.setItem('ml-junior-rejected-tools', JSON.stringify(rejected));
   } catch (e) {
     console.warn('Failed to persist rejected tools:', e);
   }

@@ -6,7 +6,7 @@
  */
 import { logger } from '@/utils/logger';
 
-const STORAGE_KEY = 'hf-agent-backend-messages';
+const STORAGE_KEY = 'ml-junior-backend-messages';
 const MAX_SESSIONS = 50;
 
 type MessagesMap = Record<string, unknown[]>;

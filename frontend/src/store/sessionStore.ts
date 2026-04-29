@@ -122,7 +122,7 @@ export const useSessionStore = create<SessionStore>()(
       },
     }),
     {
-      name: 'hf-agent-sessions',
+      name: 'ml-junior-sessions',
       partialize: (state) => ({
         sessions: state.sessions,
         activeSessionId: state.activeSessionId,

@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger';
 
-const STORAGE_KEY = 'hf-agent-sse-event-cursors';
+const STORAGE_KEY = 'ml-junior-sse-event-cursors';
 const MAX_SESSIONS = 100;
 
 type CursorMap = Record<string, number>;

@@ -32,13 +32,16 @@ export default function FlowPreviewDetails({ preview }: { preview: FlowPreviewRe
     <Box sx={{ minWidth: 0 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1.5, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="caption" sx={labelSx}>Preview</Typography>
+          <Typography variant="caption" sx={labelSx}>Definition preview</Typography>
           <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.16, overflowWrap: 'anywhere' }}>{preview.name}</Typography>
           {preview.description && (
             <Typography variant="body2" sx={{ color: 'var(--muted-text)', mt: 0.5, overflowWrap: 'anywhere' }}>
               {preview.description}
             </Typography>
           )}
+          <Typography variant="body2" sx={{ color: 'var(--muted-text)', mt: 0.5, overflowWrap: 'anywhere' }}>
+            Read-only template definition, not a running project.
+          </Typography>
           <Typography variant="caption" sx={{ ...monoLineSx, mt: 0.75 }}>{preview.template_source.path}</Typography>
         </Box>
         <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', rowGap: 0.75 }}>
@@ -48,27 +51,27 @@ export default function FlowPreviewDetails({ preview }: { preview: FlowPreviewRe
         </Stack>
       </Box>
 
-      <PreviewSection title="Required inputs" icon={<InputOutlinedIcon />}>
+      <PreviewSection title="Required input definitions" icon={<InputOutlinedIcon />}>
         {preview.required_inputs.length > 0
           ? preview.required_inputs.map((input) => <InputRow key={input.id} input={input} />)
-          : <Placeholder text="No required inputs." />}
+          : <Placeholder text="No required input definitions." />}
       </PreviewSection>
 
-      <PreviewSection title="Budget limits" icon={<SpeedOutlinedIcon />}>
+      <PreviewSection title="Budget definition" icon={<SpeedOutlinedIcon />}>
         <BudgetRows preview={preview} />
       </PreviewSection>
 
-      <PreviewSection title="Phases" icon={<AccountTreeOutlinedIcon />}>
+      <PreviewSection title="Template phases" icon={<AccountTreeOutlinedIcon />}>
         {preview.phases.map((phase) => <PhaseRow key={phase.id} phase={phase} />)}
       </PreviewSection>
 
-      <PreviewSection title="Approval points" icon={<FactCheckOutlinedIcon />}>
+      <PreviewSection title="Approval definitions" icon={<FactCheckOutlinedIcon />}>
         {preview.approval_points.length > 0
           ? preview.approval_points.map((approval) => <ApprovalPointRow key={approval.id} approval={approval} />)
-          : <Placeholder text="No approval points." />}
+          : <Placeholder text="No approval definitions." />}
       </PreviewSection>
 
-      <PreviewSection title="Expected artifacts" icon={<Inventory2OutlinedIcon />}>
+      <PreviewSection title="Expected artifact definitions" icon={<Inventory2OutlinedIcon />}>
         <Stack spacing={0.75}>
           {preview.required_outputs.length > 0 && (
             <OutputGroup title="Required outputs" items={preview.required_outputs} />
@@ -76,20 +79,20 @@ export default function FlowPreviewDetails({ preview }: { preview: FlowPreviewRe
           {preview.artifacts.length > 0 && (
             <ArtifactGroup title="Artifacts" items={preview.artifacts} />
           )}
-          {preview.required_outputs.length === 0 && preview.artifacts.length === 0 && <Placeholder text="No expected artifacts." />}
+          {preview.required_outputs.length === 0 && preview.artifacts.length === 0 && <Placeholder text="No expected artifact definitions." />}
         </Stack>
       </PreviewSection>
 
-      <PreviewSection title="Risky operations" icon={<WarningAmberOutlinedIcon />}>
+      <PreviewSection title="Risk policy definitions" icon={<WarningAmberOutlinedIcon />}>
         {preview.risky_operations.length > 0
           ? preview.risky_operations.map((operation) => <RiskyOperationRow key={operation.id} operation={operation} />)
-          : <Placeholder text="No risky operations." />}
+          : <Placeholder text="No risky operation definitions." />}
       </PreviewSection>
 
-      <PreviewSection title="Verifier checklist" icon={<ChecklistOutlinedIcon />}>
+      <PreviewSection title="Verifier checklist definitions" icon={<ChecklistOutlinedIcon />}>
         {preview.verifier_checks.length > 0
           ? preview.verifier_checks.map((check) => <VerifierRow key={check.id} check={check} />)
-          : <Placeholder text="No verifier checks." />}
+          : <Placeholder text="No verifier check definitions." />}
       </PreviewSection>
     </Box>
   );

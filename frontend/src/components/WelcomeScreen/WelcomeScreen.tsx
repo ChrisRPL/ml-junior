@@ -195,7 +195,7 @@ export default function WelcomeScreen() {
 
   // Iframe: localStorage-based org tracking (no auth token available)
   const [iframeOrgJoined, setIframeOrgJoined] = useState(() => {
-    try { return localStorage.getItem('hf-agent-org-joined') === '1'; } catch { return false; }
+    try { return localStorage.getItem('ml-junior-org-joined') === '1'; } catch { return false; }
   });
   const joinLinkOpened = useRef(false);
 
@@ -205,7 +205,7 @@ export default function WelcomeScreen() {
     const handleVisibility = () => {
       if (document.visibilityState !== 'visible' || !joinLinkOpened.current) return;
       joinLinkOpened.current = false;
-      try { localStorage.setItem('hf-agent-org-joined', '1'); } catch { /* ignore */ }
+      try { localStorage.setItem('ml-junior-org-joined', '1'); } catch { /* ignore */ }
       setIframeOrgJoined(true);
     };
     document.addEventListener('visibilitychange', handleVisibility);

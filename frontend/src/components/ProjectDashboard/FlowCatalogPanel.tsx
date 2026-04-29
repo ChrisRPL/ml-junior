@@ -67,9 +67,7 @@ export default function FlowCatalogPanel() {
       }
       setCatalogState({ kind: 'ready', items: result.catalog });
       setSelectedId((current) => (
-        current && result.catalog.some((item) => item.id === current)
-          ? current
-          : result.catalog[0]?.id ?? null
+        current && result.catalog.some((item) => item.id === current) ? current : null
       ));
     });
 
@@ -103,15 +101,15 @@ export default function FlowCatalogPanel() {
     <Box sx={panelSx}>
       <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1.5, mb: 1.5, flexWrap: 'wrap' }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="caption" sx={eyebrowSx}>Flow catalog</Typography>
-          <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.15 }}>Built-in flow previews</Typography>
+          <Typography variant="caption" sx={eyebrowSx}>Template library</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.15 }}>Built-in flow definitions</Typography>
           <Typography variant="body2" sx={{ color: 'var(--muted-text)', mt: 0.25 }}>
-            Read-only templates from backend workflow definitions.
+            Read-only catalog metadata from backend templates. Nothing here is a running project.
           </Typography>
         </Box>
         <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', rowGap: 0.75 }}>
           <FlowChip label="read only" tone="good" />
-          <FlowChip label="backend sourced" tone="blue" />
+          <FlowChip label="not a running project" tone="muted" />
         </Stack>
       </Box>
 
@@ -139,7 +137,7 @@ function CatalogList({
 }) {
   return (
     <Box sx={{ minWidth: 0 }}>
-      <SectionHeading icon={<ListAltOutlinedIcon />} title="Catalog" meta={`${items.length} templates`} />
+      <SectionHeading icon={<ListAltOutlinedIcon />} title="Template library" meta={`${items.length} templates`} />
       <Box sx={{ borderTop: '1px solid var(--border)' }}>
         {items.map((item) => {
           const selected = item.id === selectedId;
@@ -194,16 +192,16 @@ function CatalogList({
 
 function PreviewPane({ state, selectedItem }: { state: PreviewState; selectedItem: FlowCatalogItem | null }) {
   if (!selectedItem) {
-    return <PanelState title="Select a flow" detail="Choose a template from the catalog to inspect its preview." />;
+    return <PanelState title="Definition preview" detail="Select a template to inspect its definition. This is catalog metadata, not a running project." />;
   }
   if (state.kind === 'loading') {
-    return <PanelState title="Loading preview" detail={`Fetching /api/flows/${selectedItem.id}/preview.`} loading />;
+    return <PanelState title="Loading definition preview" detail={`Fetching /api/flows/${selectedItem.id}/preview.`} loading />;
   }
   if (state.kind === 'error') {
     return <FailureState failure={state.failure} endpoint={`/api/flows/${selectedItem.id}/preview`} />;
   }
   if (state.kind !== 'ready') {
-    return <PanelState title="Preview pending" detail="Waiting for a selected flow template." />;
+    return <PanelState title="Definition preview" detail="Select a template to inspect its definition." />;
   }
 
   return <FlowPreviewDetails preview={state.preview} />;

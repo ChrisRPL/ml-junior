@@ -7,7 +7,7 @@ import type { PerSessionState } from '@/store/agentStore';
 /** Max steps to keep in storage and display. Single source of truth. */
 export const RESEARCH_MAX_STEPS = 4;
 
-const STORAGE_KEY = 'hf-agent-research';
+const STORAGE_KEY = 'ml-junior-research';
 
 type ResearchState = {
   steps: string[];
