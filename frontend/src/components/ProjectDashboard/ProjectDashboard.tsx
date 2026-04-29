@@ -26,6 +26,7 @@ import type {
   ProjectSnapshot,
 } from '@/types/project';
 import type { SessionMeta } from '@/types/agent';
+import FlowCatalogPanel from './FlowCatalogPanel';
 import {
   alertSx,
   dashboardGridSx,
@@ -76,6 +77,9 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
           title="Session-only project"
           detail="Project rows will appear when session events are available."
         />
+        <Box sx={{ mt: 1.5 }}>
+          <FlowCatalogPanel />
+        </Box>
       </DashboardFrame>
     );
   }
@@ -117,6 +121,10 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
         <Metric title="Approvals" value={snapshot.pending_approvals.length} detail={snapshot.status === 'waiting_approval' ? 'blocked' : 'pending'} tone={snapshot.pending_approvals.length > 0 ? 'amber' : 'muted'} />
         <Metric title="Active jobs/tools" value={snapshot.active_jobs.length + runningOperations(snapshot.operation_refs).length} detail="running" tone={snapshot.active_jobs.length > 0 ? 'blue' : 'muted'} />
         <Metric title="Resume" value={snapshot.resume.can_resume ? 'ready' : 'not yet'} detail={`seq ${snapshot.resume.event_sequence}`} tone={snapshot.resume.can_resume ? 'good' : 'muted'} mono />
+      </Box>
+
+      <Box sx={{ mb: 2 }}>
+        <FlowCatalogPanel />
       </Box>
 
       <Box sx={dashboardGridSx}>

@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "test:project-projection": "tsc --module commonjs --moduleResolution node --target ES2020 --lib ES2020,DOM --strict --skipLibCheck --esModuleInterop --outDir /tmp/mlj-project-projection-test src/lib/project-projection.test.ts && node /tmp/mlj-project-projection-test/lib/project-projection.test.js",
     "test:project-snapshot-api": "tsc --module commonjs --moduleResolution node --target ES2020 --lib ES2020,DOM --strict --skipLibCheck --esModuleInterop --outDir /tmp/mlj-project-snapshot-api-test src/lib/project-snapshot-api.test.ts && node /tmp/mlj-project-snapshot-api-test/lib/project-snapshot-api.test.js",
+    "test:flow-preview-api": "tsc --module commonjs --moduleResolution node --target ES2020 --lib ES2020,DOM --strict --skipLibCheck --esModuleInterop --outDir /tmp/mlj-flow-preview-api-test src/lib/flow-preview-api.test.ts && node /tmp/mlj-flow-preview-api-test/lib/flow-preview-api.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
