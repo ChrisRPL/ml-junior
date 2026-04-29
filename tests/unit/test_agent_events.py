@@ -313,6 +313,165 @@ def test_current_event_payloads_are_modeled(event_type, payload):
     assert event.data == payload
 
 
+def _valid_experiment_run_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "run_id": "run-1",
+        "hypothesis": "Train baseline with frozen encoder",
+        "status": "completed",
+        "source_event_sequence": 7,
+        "phase_id": "train",
+        "dataset_snapshot_refs": [
+            {
+                "snapshot_id": "dataset-1",
+                "source": "dataset_registry",
+                "name": "training-set",
+                "digest": "sha256:data",
+            }
+        ],
+        "code_snapshot_refs": [
+            {
+                "snapshot_id": "code-1",
+                "source": "git",
+                "git_commit": "abcdef123456",
+                "git_ref": "main",
+            }
+        ],
+        "config": {"learning_rate": 0.001, "epochs": 3},
+        "seed": 1234,
+        "runtime": {
+            "provider": "local",
+            "started_at": "2026-04-29T10:00:00Z",
+            "ended_at": "2026-04-29T10:15:00Z",
+            "duration_seconds": 900.0,
+            "hardware": {"accelerator": "cpu"},
+        },
+        "metrics": [
+            {
+                "name": "accuracy",
+                "value": 0.91,
+                "source": "tool",
+                "step": 3,
+                "unit": "ratio",
+            }
+        ],
+        "log_refs": [
+            {
+                "log_id": "log-1",
+                "source": "stdout",
+                "label": "training log",
+            }
+        ],
+        "artifact_refs": [
+            {
+                "artifact_id": "artifact-1",
+                "type": "model_checkpoint",
+                "source": "local_path",
+                "uri": "file:///tmp/model.pt",
+            }
+        ],
+        "verifier_refs": [
+            {
+                "verifier_id": "verifier-1",
+                "type": "metric",
+                "status": "passed",
+                "source": "flow_template",
+            }
+        ],
+        "external_tracking_refs": [
+            {
+                "tracking_id": "tracking-1",
+                "source": "external_tracking",
+                "provider": "tracking-provider",
+                "uri": "https://tracking.example/runs/tracking-1",
+            }
+        ],
+        "created_at": "2026-04-29T10:16:00Z",
+    }
+
+
+def test_experiment_run_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=8,
+        event_type="experiment.run_recorded",
+        data=_valid_experiment_run_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["run_id"] == "run-1"
+    assert event.data["status"] == "completed"
+    assert event.data["dataset_snapshot_refs"][0]["source"] == "dataset_registry"
+    assert event.data["runtime"]["provider"] == "local"
+    assert event.data["metrics"][0]["name"] == "accuracy"
+
+
+def test_experiment_run_recorded_rejects_unknown_top_level_fields():
+    payload = _valid_experiment_run_recorded_payload()
+    payload["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=8,
+            event_type="experiment.run_recorded",
+            data=payload,
+        )
+
+
+def test_experiment_run_recorded_rejects_unknown_nested_fields():
+    payload = _valid_experiment_run_recorded_payload()
+    payload["metrics"][0]["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=8,
+            event_type="experiment.run_recorded",
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("session_id",), ""),
+        (("run_id",), ""),
+        (("hypothesis",), ""),
+        (("dataset_snapshot_refs", 0, "snapshot_id"), ""),
+        (("metrics", 0, "name"), ""),
+    ],
+)
+def test_experiment_run_recorded_rejects_empty_required_ids_and_text(path, value):
+    payload = _valid_experiment_run_recorded_payload()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=8,
+            event_type="experiment.run_recorded",
+            data=payload,
+        )
+
+
+def test_experiment_run_recorded_rejects_unmodeled_source_literals():
+    payload = _valid_experiment_run_recorded_payload()
+    payload["dataset_snapshot_refs"][0]["source"] = "ad_hoc"
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=8,
+            event_type="experiment.run_recorded",
+            data=payload,
+        )
+
+
 def test_known_event_payloads_validate_required_fields():
     with pytest.raises(ValidationError):
         AgentEvent(

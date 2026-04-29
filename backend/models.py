@@ -3,7 +3,10 @@
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+
+NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class OpType(str, Enum):
@@ -255,6 +258,115 @@ class HandoffSummaryCreatedEvent(ContinuityModel):
     handoff_id: str = Field(min_length=1)
     source_event_sequence: int | None = Field(default=None, ge=1)
     summary: HandoffSummary
+
+
+class ExperimentLedgerModel(BaseModel):
+    """Closed-schema base for inert experiment ledger records."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ExperimentDatasetSnapshotRef(ExperimentLedgerModel):
+    snapshot_id: NonEmptyStr
+    source: Literal["dataset_registry", "local_path", "remote_uri", "event_ref"]
+    uri: NonEmptyStr | None = None
+    name: NonEmptyStr | None = None
+    digest: NonEmptyStr | None = None
+
+
+class ExperimentCodeSnapshotRef(ExperimentLedgerModel):
+    snapshot_id: NonEmptyStr
+    source: Literal["git", "archive", "local_path", "event_ref"]
+    uri: NonEmptyStr | None = None
+    git_commit: NonEmptyStr | None = None
+    git_ref: NonEmptyStr | None = None
+    digest: NonEmptyStr | None = None
+
+
+class ExperimentMetricRecord(ExperimentLedgerModel):
+    name: NonEmptyStr
+    value: int | float | str | bool
+    source: Literal["manual", "tool", "verifier", "external_tracking"]
+    step: int | None = Field(default=None, ge=0)
+    unit: NonEmptyStr | None = None
+    recorded_at: NonEmptyStr | None = None
+
+
+class ExperimentLogRef(ExperimentLedgerModel):
+    log_id: NonEmptyStr
+    source: Literal["stdout", "stderr", "local_path", "remote_uri", "event_ref"]
+    uri: NonEmptyStr | None = None
+    label: NonEmptyStr | None = None
+
+
+class ExperimentArtifactRef(ExperimentLedgerModel):
+    artifact_id: NonEmptyStr
+    type: NonEmptyStr
+    source: Literal["local_path", "remote_uri", "hf_hub", "event_ref"]
+    uri: NonEmptyStr | None = None
+    digest: NonEmptyStr | None = None
+
+
+class ExperimentVerifierRef(ExperimentLedgerModel):
+    verifier_id: NonEmptyStr
+    type: Literal["manual", "metric", "artifact", "command", "llm"]
+    status: Literal["pending", "passed", "failed", "inconclusive"]
+    source: Literal["flow_template", "runtime", "external"]
+    result_ref: NonEmptyStr | None = None
+
+
+class ExperimentExternalTrackingRef(ExperimentLedgerModel):
+    tracking_id: NonEmptyStr
+    source: Literal["external_tracking", "event_ref"]
+    provider: NonEmptyStr
+    uri: NonEmptyStr | None = None
+    run_name: NonEmptyStr | None = None
+
+
+class ExperimentRunRuntime(ExperimentLedgerModel):
+    provider: Literal[
+        "local",
+        "huggingface_jobs",
+        "github_actions",
+        "external",
+        "unknown",
+    ]
+    started_at: NonEmptyStr | None = None
+    ended_at: NonEmptyStr | None = None
+    duration_seconds: float | None = Field(default=None, ge=0)
+    hardware: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentRunRecord(ExperimentLedgerModel):
+    session_id: NonEmptyStr
+    run_id: NonEmptyStr
+    hypothesis: NonEmptyStr
+    status: Literal[
+        "planned",
+        "running",
+        "completed",
+        "failed",
+        "verified",
+        "rejected",
+        "cancelled",
+    ]
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    phase_id: NonEmptyStr | None = None
+    dataset_snapshot_refs: list[ExperimentDatasetSnapshotRef] = Field(
+        default_factory=list
+    )
+    code_snapshot_refs: list[ExperimentCodeSnapshotRef] = Field(default_factory=list)
+    config: dict[str, Any] = Field(default_factory=dict)
+    seed: int | None = None
+    runtime: ExperimentRunRuntime | None = None
+    metrics: list[ExperimentMetricRecord] = Field(default_factory=list)
+    log_refs: list[ExperimentLogRef] = Field(default_factory=list)
+    artifact_refs: list[ExperimentArtifactRef] = Field(default_factory=list)
+    verifier_refs: list[ExperimentVerifierRef] = Field(default_factory=list)
+    external_tracking_refs: list[ExperimentExternalTrackingRef] = Field(
+        default_factory=list
+    )
+    created_at: NonEmptyStr | None = None
 
 
 class FlowTemplateMetadata(BaseModel):
