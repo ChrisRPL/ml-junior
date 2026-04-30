@@ -8,6 +8,10 @@ from pydantic import ValidationError
 
 from agent.core.events import AgentEvent, EVENT_PAYLOAD_MODELS
 from agent.core.session import Event, Session
+from backend.budget_ledger import (
+    BUDGET_LIMIT_RECORDED_EVENT,
+    BUDGET_USAGE_RECORDED_EVENT,
+)
 from backend.human_requests import (
     HUMAN_REQUEST_REQUESTED_EVENT,
     HUMAN_REQUEST_RESOLVED_EVENT,
@@ -800,6 +804,48 @@ def _valid_proof_bundle_recorded_payload() -> dict:
     }
 
 
+def _valid_budget_limit_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "limit_id": " limit-1 ",
+        "source_event_sequence": 22,
+        "scope": "session",
+        "scope_id": "session-a",
+        "resource": "llm_cost",
+        "limit": 25.0,
+        "unit": "usd",
+        "period": "session",
+        "source": "flow_template",
+        "metadata": {"template_id": "fine-tune-model"},
+        "privacy_class": "private",
+        "redaction_status": "none",
+        "created_at": " 2026-04-29T10:12:00Z ",
+    }
+
+
+def _valid_budget_usage_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "usage_id": " usage-1 ",
+        "source_event_sequence": 23,
+        "scope": "job",
+        "scope_id": " job-1 ",
+        "resource": "gpu_time",
+        "amount": 0.5,
+        "unit": "gpu_hours",
+        "source": "provider_usage",
+        "provider": "huggingface_jobs",
+        "limit_id": " limit-1 ",
+        "tool_call_id": " tc-1 ",
+        "job_id": " job-1 ",
+        "occurred_at": " 2026-04-29T10:13:00Z ",
+        "metadata": {"hardware": "cpu-basic"},
+        "privacy_class": "private",
+        "redaction_status": "partial",
+        "created_at": " 2026-04-29T10:14:00Z ",
+    }
+
+
 def test_dataset_snapshot_recorded_payload_validates_and_normalizes():
     event = AgentEvent(
         session_id="session-a",
@@ -1448,6 +1494,154 @@ def test_decision_proof_payloads_redact_sensitive_fields_in_event_copy():
     assert redacted.redaction_status in {"partial", "redacted"}
     assert secret not in str(redacted.data)
     assert redacted.data["redaction_status"] == redacted.redaction_status
+
+
+def test_budget_limit_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=22,
+        event_type=BUDGET_LIMIT_RECORDED_EVENT,
+        data=_valid_budget_limit_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["limit_id"] == "limit-1"
+    assert event.data["scope_id"] == "session-a"
+    assert event.data["resource"] == "llm_cost"
+    assert event.data["limit"] == 25.0
+    assert event.data["unit"] == "usd"
+    assert event.data["created_at"] == "2026-04-29T10:12:00Z"
+
+
+def test_budget_usage_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=23,
+        event_type=BUDGET_USAGE_RECORDED_EVENT,
+        data=_valid_budget_usage_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["usage_id"] == "usage-1"
+    assert event.data["scope_id"] == "job-1"
+    assert event.data["resource"] == "gpu_time"
+    assert event.data["amount"] == 0.5
+    assert event.data["provider"] == "huggingface_jobs"
+    assert event.data["job_id"] == "job-1"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory"),
+    [
+        (BUDGET_LIMIT_RECORDED_EVENT, _valid_budget_limit_recorded_payload),
+        (BUDGET_USAGE_RECORDED_EVENT, _valid_budget_usage_recorded_payload),
+    ],
+)
+def test_budget_payloads_reject_unknown_top_level_fields(event_type, payload_factory):
+    payload = payload_factory()
+    payload["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=24,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "path"),
+    [
+        (BUDGET_LIMIT_RECORDED_EVENT, _valid_budget_limit_recorded_payload, ("limit_id",)),
+        (BUDGET_LIMIT_RECORDED_EVENT, _valid_budget_limit_recorded_payload, ("scope_id",)),
+        (BUDGET_USAGE_RECORDED_EVENT, _valid_budget_usage_recorded_payload, ("usage_id",)),
+        (
+            BUDGET_USAGE_RECORDED_EVENT,
+            _valid_budget_usage_recorded_payload,
+            ("tool_call_id",),
+        ),
+    ],
+)
+def test_budget_payloads_reject_empty_required_ids_and_text(
+    event_type,
+    payload_factory,
+    path,
+):
+    payload = payload_factory()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = ""
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=24,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "field", "value"),
+    [
+        (
+            BUDGET_LIMIT_RECORDED_EVENT,
+            _valid_budget_limit_recorded_payload,
+            "limit",
+            0,
+        ),
+        (
+            BUDGET_LIMIT_RECORDED_EVENT,
+            _valid_budget_limit_recorded_payload,
+            "unit",
+            "tokens",
+        ),
+        (
+            BUDGET_LIMIT_RECORDED_EVENT,
+            _valid_budget_limit_recorded_payload,
+            "source",
+            "provider_usage",
+        ),
+        (
+            BUDGET_USAGE_RECORDED_EVENT,
+            _valid_budget_usage_recorded_payload,
+            "amount",
+            -0.1,
+        ),
+        (
+            BUDGET_USAGE_RECORDED_EVENT,
+            _valid_budget_usage_recorded_payload,
+            "unit",
+            "cpu_hours",
+        ),
+        (
+            BUDGET_USAGE_RECORDED_EVENT,
+            _valid_budget_usage_recorded_payload,
+            "provider",
+            None,
+        ),
+    ],
+)
+def test_budget_payloads_reject_invalid_values(
+    event_type,
+    payload_factory,
+    field,
+    value,
+):
+    payload = payload_factory()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=24,
+            event_type=event_type,
+            data=payload,
+        )
 
 
 @pytest.mark.parametrize(

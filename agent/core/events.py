@@ -9,6 +9,12 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from agent.core.redaction import REDACTION_NONE, redact_value
+from backend.budget_ledger import (
+    BUDGET_LIMIT_RECORDED_EVENT,
+    BUDGET_USAGE_RECORDED_EVENT,
+    BudgetLimitRecord,
+    BudgetUsageRecord,
+)
 from backend.decision_proof_ledger import DecisionCardRecord, ProofBundleRecord
 from backend.human_requests import (
     HUMAN_REQUEST_REQUESTED_EVENT,
@@ -537,6 +543,14 @@ class ProofBundleRecordedPayload(ProofBundleRecord):
     """Closed-schema payload for inert proof bundle records."""
 
 
+class BudgetLimitRecordedPayload(BudgetLimitRecord):
+    """Closed-schema payload for inert budget limit records."""
+
+
+class BudgetUsageRecordedPayload(BudgetUsageRecord):
+    """Closed-schema payload for inert budget usage records."""
+
+
 EVENT_PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "ready": MessagePayload,
     "processing": MessagePayload,
@@ -570,6 +584,8 @@ EVENT_PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "verifier.completed": VerifierCompletedPayload,
     "decision_card.recorded": DecisionCardRecordedPayload,
     "proof_bundle.recorded": ProofBundleRecordedPayload,
+    BUDGET_LIMIT_RECORDED_EVENT: BudgetLimitRecordedPayload,
+    BUDGET_USAGE_RECORDED_EVENT: BudgetUsageRecordedPayload,
     HUMAN_REQUEST_REQUESTED_EVENT: HumanRequestRequestedPayload,
     HUMAN_REQUEST_RESOLVED_EVENT: HumanRequestResolvedPayload,
 }
