@@ -1,0 +1,248 @@
+{
+  "id": "hyperparameter-sweep",
+  "name": "Hyperparameter Sweep",
+  "version": "v1",
+  "description": "Plan and verify a controlled hyperparameter sweep with fixed objectives, search space, metrics, approvals, and evidence outputs.",
+  "inputs": [
+    {
+      "id": "objective",
+      "type": "string",
+      "required": true,
+      "description": "Training or evaluation goal the sweep should optimize."
+    },
+    {
+      "id": "primary_metric",
+      "type": "string",
+      "required": true,
+      "description": "Primary metric used to rank sweep trials."
+    },
+    {
+      "id": "search_space",
+      "type": "object",
+      "required": true,
+      "description": "Parameters, ranges, distributions, and fixed controls for the sweep."
+    },
+    {
+      "id": "base_config",
+      "type": "string",
+      "required": false,
+      "description": "Baseline training or evaluation configuration to vary from."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 12.0,
+    "max_runs": 20,
+    "max_wall_clock_hours": 36.0,
+    "max_llm_usd": 8.0
+  },
+  "permissions": [
+    {
+      "id": "read-experiment-assets",
+      "risk": "low",
+      "action": "read",
+      "target": "model-dataset-config-and-prior-results",
+      "description": "Read model, dataset, configuration, metric, and prior experiment metadata needed to plan the sweep."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-sweep-plan",
+      "risk": "low",
+      "action": "approve",
+      "target": "hyperparameter-sweep-plan",
+      "description": "Confirm objective, metric, fixed controls, search space, and stop criteria."
+    },
+    {
+      "id": "approve-sweep-execution",
+      "risk": "medium",
+      "action": "approve",
+      "target": "budgeted-experiment-run-plan",
+      "description": "Confirm the bounded trial matrix, resource assumptions, and evidence capture plan before any run starts."
+    },
+    {
+      "id": "publish-sweep-summary",
+      "risk": "medium",
+      "action": "publish",
+      "target": "experiment-report-or-model-card",
+      "description": "Publish sweep conclusions, selected configuration, or model-card evidence outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "sweep-objective",
+      "name": "Sweep Objective",
+      "objective": "Define the optimization target, baseline, fixed controls, ranking metric, and non-goals.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["sweep-brief"],
+      "approval_points": ["approve-sweep-plan"],
+      "verifiers": ["eval-goal-is-testable"]
+    },
+    {
+      "id": "search-space",
+      "name": "Search Space",
+      "objective": "Document parameters, ranges, distributions, seeds, resource envelope, and pruning or stop rules.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["search-space-spec", "training-config"],
+      "approval_points": [],
+      "verifiers": ["training-config-complete", "metric-spec-complete"]
+    },
+    {
+      "id": "dry-run",
+      "name": "Dry Run",
+      "objective": "Validate one tiny configuration through preprocessing, training or evaluation wiring, logging, and metric extraction.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["dry-run-log"],
+      "approval_points": [],
+      "verifiers": ["dry-run-passed"]
+    },
+    {
+      "id": "run-plan",
+      "name": "Run Plan",
+      "objective": "Freeze the bounded trial matrix, environment, seeds, artifact names, and result table schema.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["sweep-run-plan", "environment-snapshot"],
+      "approval_points": ["approve-sweep-execution"],
+      "verifiers": ["environment-captured"]
+    },
+    {
+      "id": "results-analysis",
+      "name": "Results Analysis",
+      "objective": "Compare trial metrics, baseline deltas, stability, failed trials, and selected configuration evidence.",
+      "status": "pending",
+      "order": 5,
+      "required_outputs": ["sweep-results", "best-config"],
+      "approval_points": [],
+      "verifiers": ["metric-recorded", "baseline-compared", "reliability-checked"]
+    },
+    {
+      "id": "report",
+      "name": "Report",
+      "objective": "Summarize conclusions, caveats, reproducibility evidence, and optional publication notes.",
+      "status": "pending",
+      "order": 6,
+      "required_outputs": ["sweep-report", "verifier-verdict"],
+      "approval_points": ["publish-sweep-summary"],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "sweep-brief",
+      "type": "markdown",
+      "description": "Objective, primary metric, baseline, fixed controls, and non-goals."
+    },
+    {
+      "id": "search-space-spec",
+      "type": "json",
+      "description": "Parameters, ranges, distributions, constraints, seeds, and stop rules."
+    },
+    {
+      "id": "training-config",
+      "type": "json",
+      "description": "Base configuration, fixed controls, metric extraction, and logging schema."
+    },
+    {
+      "id": "dry-run-log",
+      "type": "log",
+      "description": "Tiny-run command, output, metric extraction result, and exit status."
+    },
+    {
+      "id": "sweep-run-plan",
+      "type": "manifest",
+      "description": "Trial matrix, resource assumptions, artifact layout, and run identifiers."
+    },
+    {
+      "id": "environment-snapshot",
+      "type": "manifest",
+      "description": "Runtime, dependency versions, hardware class, and seed controls."
+    },
+    {
+      "id": "sweep-results",
+      "type": "metrics",
+      "description": "Trial metrics, baseline deltas, selected configuration, and failure notes."
+    },
+    {
+      "id": "best-config",
+      "type": "json",
+      "description": "Best observed configuration with metric value, run id, and selection rationale."
+    },
+    {
+      "id": "sweep-report",
+      "type": "markdown",
+      "description": "Sweep conclusions, reliability caveats, and recommended next step."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "sweep-config-grid",
+      "type": "json",
+      "description": "Machine-readable search space and trial matrix."
+    },
+    {
+      "id": "trial-metrics-table",
+      "type": "table",
+      "description": "Trial-level metrics, configs, statuses, and baseline deltas."
+    },
+    {
+      "id": "best-run-config",
+      "type": "json",
+      "description": "Selected configuration and supporting metric evidence."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "eval-goal-is-testable",
+      "type": "manual",
+      "description": "Sweep objective maps to an observable metric, baseline, and bounded comparison."
+    },
+    {
+      "id": "training-config-complete",
+      "type": "artifact",
+      "description": "Base configuration, fixed controls, seeds, trainer settings, and metric extraction are captured."
+    },
+    {
+      "id": "metric-spec-complete",
+      "type": "artifact",
+      "description": "Primary metric, aggregation, tie-breakers, and reporting format are documented."
+    },
+    {
+      "id": "dry-run-passed",
+      "type": "command",
+      "description": "Dry run validates preprocessing, execution wiring, logging, and metric extraction."
+    },
+    {
+      "id": "environment-captured",
+      "type": "artifact",
+      "description": "Environment, dependency versions, hardware class, and seed controls are recorded."
+    },
+    {
+      "id": "metric-recorded",
+      "type": "metric",
+      "description": "Sweep results include metric values, split or dataset, trial id, and ranking field."
+    },
+    {
+      "id": "baseline-compared",
+      "type": "metric",
+      "description": "Best trial is compared against baseline or default configuration metrics."
+    },
+    {
+      "id": "reliability-checked",
+      "type": "manual",
+      "description": "Failed trials, metric variance, stability, and selection caveats were reviewed."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final conclusions cite run plan, metrics table, best configuration, and reliability notes."
+    }
+  ]
+}

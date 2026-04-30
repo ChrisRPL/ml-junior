@@ -1,0 +1,243 @@
+{
+  "id": "debug-failed-training-run",
+  "name": "Debug Failed Training Run",
+  "version": "v1",
+  "description": "Triage a failed training run with scoped evidence collection, root-cause hypotheses, minimal reproduction planning, and verifier-ready findings.",
+  "inputs": [
+    {
+      "id": "run_identifier",
+      "type": "string",
+      "required": true,
+      "description": "Run id, job id, experiment name, or local output directory for the failed run."
+    },
+    {
+      "id": "failure_log",
+      "type": "string",
+      "required": true,
+      "description": "Failure log, stderr excerpt, traceback, or artifact path to inspect."
+    },
+    {
+      "id": "training_config",
+      "type": "string",
+      "required": false,
+      "description": "Training configuration, launch command, or config path associated with the run."
+    },
+    {
+      "id": "expected_behavior",
+      "type": "string",
+      "required": false,
+      "description": "Expected result or prior working behavior to compare against."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 1.0,
+    "max_runs": 1,
+    "max_wall_clock_hours": 6.0,
+    "max_llm_usd": 6.0
+  },
+  "permissions": [
+    {
+      "id": "read-failed-run-artifacts",
+      "risk": "low",
+      "action": "read",
+      "target": "training-logs-configs-and-artifacts",
+      "description": "Read logs, configs, metrics, checkpoints metadata, environment snapshots, and dataset metadata for the failed run."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-debug-scope",
+      "risk": "low",
+      "action": "approve",
+      "target": "failed-run-debug-scope",
+      "description": "Confirm the debugging scope, evidence sources, non-goals, and privacy-sensitive artifacts."
+    },
+    {
+      "id": "approve-minimal-repro",
+      "risk": "medium",
+      "action": "approve",
+      "target": "minimal-reproduction-plan",
+      "description": "Confirm the bounded reproduction plan before any rerun or command execution happens."
+    },
+    {
+      "id": "publish-debug-report",
+      "risk": "medium",
+      "action": "publish",
+      "target": "debug-report-or-runbook",
+      "description": "Share root-cause findings, remediation notes, or runbook changes outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "intake",
+      "name": "Intake",
+      "objective": "Capture failed run identity, symptoms, expected behavior, constraints, and debugging boundaries.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["failure-brief"],
+      "approval_points": ["approve-debug-scope"],
+      "verifiers": ["scope-is-specific"]
+    },
+    {
+      "id": "artifact-collection",
+      "name": "Artifact Collection",
+      "objective": "Collect logs, configs, dataset references, environment details, checkpoints metadata, and prior metrics.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["failure-log-summary", "environment-snapshot", "dataset-manifest"],
+      "approval_points": [],
+      "verifiers": ["environment-captured", "dataset-fingerprint-captured"]
+    },
+    {
+      "id": "failure-triage",
+      "name": "Failure Triage",
+      "objective": "Classify the failure mode, inspect config and code assumptions, and rank root-cause hypotheses.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["root-cause-hypotheses", "training-config"],
+      "approval_points": [],
+      "verifiers": ["training-config-complete", "sources-have-provenance"]
+    },
+    {
+      "id": "minimal-repro-plan",
+      "name": "Minimal Repro Plan",
+      "objective": "Design a smallest useful reproduction or dry-run path with expected observations and stop conditions.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["repro-plan", "dry-run-log"],
+      "approval_points": ["approve-minimal-repro"],
+      "verifiers": ["code-imports", "dry-run-passed"]
+    },
+    {
+      "id": "remediation-readiness",
+      "name": "Remediation Readiness",
+      "objective": "Produce the likely fix path, validation checklist, residual risk, and evidence-backed report.",
+      "status": "pending",
+      "order": 5,
+      "required_outputs": ["remediation-plan", "debug-report", "verifier-verdict"],
+      "approval_points": ["publish-debug-report"],
+      "verifiers": ["reliability-checked", "final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "failure-brief",
+      "type": "markdown",
+      "description": "Failed run id, symptom, expected behavior, scope, and non-goals."
+    },
+    {
+      "id": "failure-log-summary",
+      "type": "markdown",
+      "description": "Relevant log excerpts, error class, first failure point, and artifact links."
+    },
+    {
+      "id": "environment-snapshot",
+      "type": "manifest",
+      "description": "Runtime, dependency versions, hardware class, environment variables summary, and seeds."
+    },
+    {
+      "id": "dataset-manifest",
+      "type": "manifest",
+      "description": "Dataset source, revision, split mapping, preprocessing assumptions, and fingerprint when available."
+    },
+    {
+      "id": "root-cause-hypotheses",
+      "type": "markdown",
+      "description": "Ranked hypotheses with supporting and contradicting evidence."
+    },
+    {
+      "id": "training-config",
+      "type": "json",
+      "description": "Training arguments, model, data, optimizer, scheduler, precision, and logging configuration."
+    },
+    {
+      "id": "repro-plan",
+      "type": "markdown",
+      "description": "Minimal reproduction or dry-run plan with commands, expected observations, and stop criteria."
+    },
+    {
+      "id": "dry-run-log",
+      "type": "log",
+      "description": "Minimal dry-run command, output, and exit status when available."
+    },
+    {
+      "id": "remediation-plan",
+      "type": "markdown",
+      "description": "Likely fix, validation checklist, rollback notes, and residual risks."
+    },
+    {
+      "id": "debug-report",
+      "type": "markdown",
+      "description": "Root-cause summary, evidence links, recommended fix, and next-step decision."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "failure-evidence-bundle",
+      "type": "manifest",
+      "description": "Pointers to logs, configs, environment snapshots, dataset metadata, and metrics used in the investigation."
+    },
+    {
+      "id": "triage-notes",
+      "type": "markdown",
+      "description": "Hypotheses, observations, rejected explanations, and remaining uncertainty."
+    },
+    {
+      "id": "reproduction-plan",
+      "type": "markdown",
+      "description": "Minimal reproduction plan and validation expectations."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "scope-is-specific",
+      "type": "manual",
+      "description": "Debugging scope, failed run identity, expected behavior, and non-goals are explicit."
+    },
+    {
+      "id": "environment-captured",
+      "type": "artifact",
+      "description": "Environment, dependency versions, hardware class, seeds, and relevant runtime settings are recorded."
+    },
+    {
+      "id": "dataset-fingerprint-captured",
+      "type": "artifact",
+      "description": "Dataset source, revision, split mapping, preprocessing assumptions, and fingerprint are recorded when relevant."
+    },
+    {
+      "id": "training-config-complete",
+      "type": "artifact",
+      "description": "Model, data, optimizer, scheduler, precision, and logging configuration are captured."
+    },
+    {
+      "id": "sources-have-provenance",
+      "type": "artifact",
+      "description": "Root-cause hypotheses cite logs, configs, artifacts, commits, or prior run evidence."
+    },
+    {
+      "id": "code-imports",
+      "type": "command",
+      "description": "Relevant training entrypoints, modules, or config loaders can be imported or inspected in isolation."
+    },
+    {
+      "id": "dry-run-passed",
+      "type": "command",
+      "description": "Minimal reproduction or dry-run path has expected command, output, and exit status evidence."
+    },
+    {
+      "id": "reliability-checked",
+      "type": "manual",
+      "description": "Residual risks, rejected hypotheses, and validation limits were reviewed."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Debug report conclusions cite logs, configs, reproduction plan, and remediation evidence."
+    }
+  ]
+}

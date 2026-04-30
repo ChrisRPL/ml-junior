@@ -160,6 +160,11 @@ _BUILTIN_FLOW_RESPONSE_METADATA: dict[str, dict[str, Any]] = {
         "runtime_class": "evaluation_harness",
         "tags": ["evaluation", "benchmarks", "metrics", "reliability"],
     },
+    "compare-models": {
+        "category": "evaluation",
+        "runtime_class": "model_comparison",
+        "tags": ["evaluation", "models", "comparison", "metrics"],
+    },
     "dataset-audit": {
         "category": "data",
         "runtime_class": "data_audit",
@@ -170,10 +175,20 @@ _BUILTIN_FLOW_RESPONSE_METADATA: dict[str, dict[str, Any]] = {
         "runtime_class": "dataset_card_review",
         "tags": ["datasets", "documentation", "cards", "quality"],
     },
+    "debug-failed-training-run": {
+        "category": "training",
+        "runtime_class": "training_debug_review",
+        "tags": ["training", "debugging", "logs", "reproducibility"],
+    },
     "fine-tune-model": {
         "category": "training",
         "runtime_class": "training",
         "tags": ["fine-tuning", "datasets", "evaluation", "hub"],
+    },
+    "hyperparameter-sweep": {
+        "category": "training",
+        "runtime_class": "hyperparameter_sweep",
+        "tags": ["experiments", "sweeps", "metrics", "reproducibility"],
     },
     "implement-architecture": {
         "category": "implementation",

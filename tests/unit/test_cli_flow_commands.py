@@ -19,10 +19,17 @@ from agent.core.flow_commands import (
 
 EXPECTED_BUILTIN_IDS = [
     "build-evaluation-harness",
+    "compare-models",
     "dataset-audit",
+    "dataset-card-review",
+    "debug-failed-training-run",
     "fine-tune-model",
+    "hyperparameter-sweep",
     "implement-architecture",
     "literature-overview",
+    "metric-selection-review",
+    "model-card-refresh",
+    "paper-to-implementation-plan",
     "reproduce-paper",
 ]
 
@@ -154,7 +161,7 @@ def test_flow_preview_requires_id_and_reports_known_missing_ids() -> None:
 
     assert "Flow not found: missing-flow" in output
     assert "Unknown built-in flow template: missing-flow" in output
-    assert "Known flows: build-evaluation-harness, dataset-audit" in output
+    assert "Known flows: build-evaluation-harness, compare-models" in output
 
 
 def test_flow_command_dispatch_rejects_unexpected_commands() -> None:

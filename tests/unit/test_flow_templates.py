@@ -21,9 +21,12 @@ FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "flow_templa
 BUILTIN_DIR = Path(__file__).resolve().parent.parent.parent / "backend" / "builtin_flow_templates"
 EXPECTED_BUILTIN_IDS = [
     "build-evaluation-harness",
+    "compare-models",
     "dataset-audit",
     "dataset-card-review",
+    "debug-failed-training-run",
     "fine-tune-model",
+    "hyperparameter-sweep",
     "implement-architecture",
     "literature-overview",
     "metric-selection-review",
@@ -247,6 +250,21 @@ def test_builtin_template_families_cover_required_gate_paths() -> None:
     assert "run-eval-suite" in {
         approval_id
         for phase in templates["build-evaluation-harness"].phases
+        for approval_id in phase.approval_points
+    }
+    assert "approve-comparison-plan" in {
+        approval_id
+        for phase in templates["compare-models"].phases
+        for approval_id in phase.approval_points
+    }
+    assert "approve-debug-scope" in {
+        approval_id
+        for phase in templates["debug-failed-training-run"].phases
+        for approval_id in phase.approval_points
+    }
+    assert "approve-sweep-plan" in {
+        approval_id
+        for phase in templates["hyperparameter-sweep"].phases
         for approval_id in phase.approval_points
     }
 

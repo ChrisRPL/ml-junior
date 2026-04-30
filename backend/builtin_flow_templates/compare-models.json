@@ -1,0 +1,263 @@
+{
+  "id": "compare-models",
+  "name": "Compare Models",
+  "version": "v1",
+  "description": "Compare candidate models with scoped objectives, metric selection, evaluation-plan approvals, result analysis, and evidence-backed recommendations.",
+  "inputs": [
+    {
+      "id": "models",
+      "type": "array",
+      "required": true,
+      "description": "Candidate model identifiers, checkpoints, endpoints, or model card URLs to compare."
+    },
+    {
+      "id": "evaluation_objective",
+      "type": "string",
+      "required": true,
+      "description": "Capability, task, product requirement, or risk the comparison should answer."
+    },
+    {
+      "id": "dataset_source",
+      "type": "string",
+      "required": false,
+      "description": "Dataset, benchmark, or representative examples for the comparison."
+    },
+    {
+      "id": "primary_metric",
+      "type": "string",
+      "required": false,
+      "description": "Primary metric or decision criterion for ranking candidates."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 4.0,
+    "max_runs": 8,
+    "max_wall_clock_hours": 16.0,
+    "max_llm_usd": 10.0
+  },
+  "permissions": [
+    {
+      "id": "read-comparison-sources",
+      "risk": "low",
+      "action": "read",
+      "target": "model-cards-dataset-cards-eval-docs-and-prior-results",
+      "description": "Read model cards, dataset cards, benchmark docs, prior results, licenses, and evaluation references."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-comparison-plan",
+      "risk": "low",
+      "action": "approve",
+      "target": "model-comparison-plan",
+      "description": "Confirm models, objective, task fit, data source, metrics, and decision criteria."
+    },
+    {
+      "id": "approve-evaluation-plan",
+      "risk": "medium",
+      "action": "approve",
+      "target": "comparison-evaluation-plan",
+      "description": "Confirm the bounded evaluation plan, adapters, resource assumptions, and artifact capture before any run starts."
+    },
+    {
+      "id": "publish-comparison-report",
+      "risk": "medium",
+      "action": "publish",
+      "target": "comparison-report-or-leaderboard",
+      "description": "Publish model comparison results, recommendations, or leaderboard-style summaries outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "comparison-scope",
+      "name": "Comparison Scope",
+      "objective": "Define the evaluation question, candidate set, target users, acceptance criteria, and non-goals.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["comparison-brief"],
+      "approval_points": ["approve-comparison-plan"],
+      "verifiers": ["eval-goal-is-testable"]
+    },
+    {
+      "id": "candidate-intake",
+      "name": "Candidate Intake",
+      "objective": "Review candidate model metadata, licenses, intended use, compatibility, and dataset assumptions.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["model-evidence-table", "dataset-manifest"],
+      "approval_points": [],
+      "verifiers": ["model-choice-justified", "dataset-fingerprint-captured"]
+    },
+    {
+      "id": "metric-and-harness",
+      "name": "Metric And Harness",
+      "objective": "Specify metrics, aggregation, scoring adapters, sample-level outputs, and comparison table schema.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["metric-spec", "scoring-code-summary"],
+      "approval_points": [],
+      "verifiers": ["metric-spec-complete", "scoring-code-runs"]
+    },
+    {
+      "id": "evaluation-plan",
+      "name": "Evaluation Plan",
+      "objective": "Freeze evaluation configuration, environment assumptions, run identifiers, and artifact paths.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["comparison-run-plan", "environment-snapshot"],
+      "approval_points": ["approve-evaluation-plan"],
+      "verifiers": ["environment-captured"]
+    },
+    {
+      "id": "results-review",
+      "name": "Results Review",
+      "objective": "Compare aggregate metrics, baseline deltas, sample-level failures, costs, and qualitative tradeoffs.",
+      "status": "pending",
+      "order": 5,
+      "required_outputs": ["comparison-metrics", "sample-results", "baseline-comparison"],
+      "approval_points": [],
+      "verifiers": ["metric-recorded", "baseline-compared", "reliability-checked"]
+    },
+    {
+      "id": "recommendation",
+      "name": "Recommendation",
+      "objective": "Produce an evidence-backed recommendation, caveats, and optional publication notes.",
+      "status": "pending",
+      "order": 6,
+      "required_outputs": ["comparison-report", "verifier-verdict"],
+      "approval_points": ["publish-comparison-report"],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "comparison-brief",
+      "type": "markdown",
+      "description": "Objective, candidate models, target users, acceptance criteria, and non-goals."
+    },
+    {
+      "id": "model-evidence-table",
+      "type": "table",
+      "description": "Candidate model metadata, licenses, intended use, limitations, and source links."
+    },
+    {
+      "id": "dataset-manifest",
+      "type": "manifest",
+      "description": "Evaluation dataset source, revision, split mapping, representative examples, and fingerprint."
+    },
+    {
+      "id": "metric-spec",
+      "type": "markdown",
+      "description": "Metrics, aggregation, tie-breakers, thresholds, and reporting format."
+    },
+    {
+      "id": "scoring-code-summary",
+      "type": "markdown",
+      "description": "Scoring adapters, task configuration, sample-level result schema, and validation notes."
+    },
+    {
+      "id": "comparison-run-plan",
+      "type": "manifest",
+      "description": "Evaluation matrix, resource assumptions, run identifiers, and artifact layout."
+    },
+    {
+      "id": "environment-snapshot",
+      "type": "manifest",
+      "description": "Runtime, dependency versions, hardware class, and seed controls."
+    },
+    {
+      "id": "comparison-metrics",
+      "type": "metrics",
+      "description": "Aggregate model metrics with dataset, split, run id, and ranking fields."
+    },
+    {
+      "id": "sample-results",
+      "type": "jsonl",
+      "description": "Sample-level predictions, references, scores, and error labels."
+    },
+    {
+      "id": "baseline-comparison",
+      "type": "metrics",
+      "description": "Baseline, incumbent, or reference model comparison values."
+    },
+    {
+      "id": "comparison-report",
+      "type": "markdown",
+      "description": "Recommendation, tradeoffs, caveats, and evidence links."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "comparison-matrix",
+      "type": "table",
+      "description": "Model-by-metric matrix with metadata, scores, costs, and caveats."
+    },
+    {
+      "id": "eval-results-jsonl",
+      "type": "jsonl",
+      "description": "Sample-level comparison results."
+    },
+    {
+      "id": "decision-record",
+      "type": "markdown",
+      "description": "Evidence-backed model selection or rejection rationale."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "eval-goal-is-testable",
+      "type": "manual",
+      "description": "Comparison objective maps to observable examples, metrics, and a bounded candidate set."
+    },
+    {
+      "id": "model-choice-justified",
+      "type": "manual",
+      "description": "Candidate models, licenses, intended uses, and compatibility constraints are documented."
+    },
+    {
+      "id": "dataset-fingerprint-captured",
+      "type": "artifact",
+      "description": "Evaluation dataset source, revision, split mapping, examples, and fingerprint are recorded."
+    },
+    {
+      "id": "metric-spec-complete",
+      "type": "artifact",
+      "description": "Metrics, aggregation, thresholds, tie-breakers, and reporting format are documented."
+    },
+    {
+      "id": "scoring-code-runs",
+      "type": "command",
+      "description": "Scoring code or adapter plan has validated fields for a minimal example."
+    },
+    {
+      "id": "environment-captured",
+      "type": "artifact",
+      "description": "Environment, dependency versions, hardware class, and seed controls are recorded."
+    },
+    {
+      "id": "metric-recorded",
+      "type": "metric",
+      "description": "Comparison metrics include model id, dataset or split, metric value, and run identifier."
+    },
+    {
+      "id": "baseline-compared",
+      "type": "metric",
+      "description": "Candidate results are compared against an incumbent, baseline, or reference result."
+    },
+    {
+      "id": "reliability-checked",
+      "type": "manual",
+      "description": "Sample-level failures, metric caveats, variance, and interpretation risks were reviewed."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Recommendation cites metrics, sample results, candidate metadata, and caveat evidence."
+    }
+  ]
+}
