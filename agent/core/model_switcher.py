@@ -16,13 +16,15 @@ glues it to CLI output + session state.
 from __future__ import annotations
 
 from agent.core.effort_probe import ProbeInconclusive, probe_effort
+from agent.core.llm_params import is_local_model_id
 
 
 # Suggested models shown by `/model` (not a gate). Users can paste any HF
 # model id (e.g. "MiniMaxAI/MiniMax-M2.7") or an `anthropic/` / `openai/`
-# prefix for direct API access. For HF ids, append ":fastest" /
-# ":cheapest" / ":preferred" / ":<provider>" to override the default
-# routing policy (auto = fastest with failover).
+# prefix for direct API access, or `local/ollama/<model>` /
+# `local/llamacpp/<alias>` for local OpenAI-compatible servers. For HF ids,
+# append ":fastest" / ":cheapest" / ":preferred" / ":<provider>" to override
+# the default routing policy (auto = fastest with failover).
 SUGGESTED_MODELS = [
     {"id": "openai/gpt-5.5", "label": "GPT-5.5"},
     {"id": "openai/gpt-5.4", "label": "GPT-5.4"},
@@ -43,6 +45,8 @@ def is_valid_model_id(model_id: str) -> bool:
     Accepts:
       • anthropic/<model>
       • openai/<model>
+      • local/ollama/<model>
+      • local/llamacpp/<alias>
       • <org>/<model>[:<tag>]            (HF router; tag = provider or policy)
       • huggingface/<org>/<model>[:<tag>] (same, accepts legacy prefix)
 
@@ -51,6 +55,8 @@ def is_valid_model_id(model_id: str) -> bool:
     """
     if not model_id or "/" not in model_id:
         return False
+    if model_id.startswith("local/"):
+        return is_local_model_id(model_id)
     head = model_id.split(":", 1)[0]
     parts = head.split("/")
     return len(parts) >= 2 and all(parts)
@@ -62,10 +68,11 @@ def _print_hf_routing_info(model_id: str, console) -> bool:
     proceed with the switch, ``False`` to indicate a hard problem the user
     should notice before we fire the effort probe.
 
-    Anthropic / OpenAI ids return ``True`` without printing anything —
-    the probe below covers "does this model exist".
+    Anthropic / OpenAI / local ids return ``True`` without printing anything.
+    The probe below covers "does this model exist" for remote direct models;
+    local models deliberately skip probing.
     """
-    if model_id.startswith(("anthropic/", "openai/")):
+    if model_id.startswith(("anthropic/", "openai/", "local/")):
         return True
 
     from agent.core import hf_router_catalog as cat
@@ -138,7 +145,8 @@ def print_model_listing(config, console) -> None:
     console.print(
         "\n[dim]Paste any HF model id (e.g. 'MiniMaxAI/MiniMax-M2.7').\n"
         "Add ':fastest', ':cheapest', ':preferred', or ':<provider>' to override routing.\n"
-        "Use 'anthropic/<model>' or 'openai/<model>' for direct API access.[/dim]"
+        "Use 'anthropic/<model>' or 'openai/<model>' for direct API access.\n"
+        "Use 'local/ollama/<model>' or 'local/llamacpp/<alias>' for local inference.[/dim]"
     )
 
 
@@ -148,7 +156,9 @@ def print_invalid_id(arg: str, console) -> None:
         "[dim]Expected:\n"
         "  • <org>/<model>[:tag]    (HF router — paste from huggingface.co)\n"
         "  • anthropic/<model>\n"
-        "  • openai/<model>[/dim]"
+        "  • openai/<model>\n"
+        "  • local/ollama/<model>\n"
+        "  • local/llamacpp/<alias>[/dim]"
     )
 
 
@@ -197,6 +207,14 @@ async def probe_and_switch_model(
     """
     preference = config.reasoning_effort
     if not _print_hf_routing_info(model_id, console):
+        return
+
+    if is_local_model_id(model_id):
+        _commit_switch(model_id, config, session, effective=None, cache=True)
+        console.print(
+            f"[green]Model switched to {model_id}[/green] "
+            "[dim](local, effort: off)[/dim]"
+        )
         return
 
     if not preference:

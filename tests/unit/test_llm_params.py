@@ -1,3 +1,7 @@
+import asyncio
+from types import SimpleNamespace
+
+import pytest
 from fastapi import HTTPException
 
 from agent.core.llm_params import (
@@ -8,8 +12,19 @@ from agent.core.llm_params import (
 from agent.core.model_switcher import (
     SUGGESTED_MODELS,
     _format_switch_error,
+    _print_hf_routing_info,
+    is_valid_model_id,
+    probe_and_switch_model,
 )
 from backend.routes.agent import AVAILABLE_MODELS, _require_openai_configured
+
+
+class _Console:
+    def __init__(self):
+        self.messages: list[str] = []
+
+    def print(self, *parts):
+        self.messages.append(" ".join(str(part) for part in parts))
 
 
 def test_openai_direct_params_do_not_use_hf_router_or_tokens(monkeypatch):
@@ -39,6 +54,98 @@ def test_openai_provider_registry_marks_direct_capability():
     assert "xhigh" in provider.efforts
     assert provider.uses_hf_router is False
     assert provider.sends_hf_billing_headers is False
+
+
+def test_local_ollama_params_use_dummy_key_and_ignore_remote_credentials(monkeypatch):
+    monkeypatch.setenv("INFERENCE_TOKEN", "hf-space-token")
+    monkeypatch.setenv("HF_TOKEN", "hf-user-token")
+    monkeypatch.setenv("HF_BILL_TO", "test-org")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-remote")
+
+    params = _resolve_llm_params(
+        "local/ollama/llama3.2:latest",
+        session_hf_token="hf-session-token",
+        reasoning_effort="high",
+    )
+
+    assert params == {
+        "model": "openai/llama3.2:latest",
+        "api_base": "http://localhost:11434/v1",
+        "api_key": "local-dummy-key",
+    }
+
+
+def test_local_llamacpp_params_use_openai_compatible_defaults():
+    params = _resolve_llm_params("local/llamacpp/qwen3-coder")
+
+    assert params == {
+        "model": "openai/qwen3-coder",
+        "api_base": "http://localhost:8080/v1",
+        "api_key": "local-dummy-key",
+    }
+
+
+def test_local_strict_effort_is_rejected_before_provider_call():
+    with pytest.raises(UnsupportedEffortError) as exc:
+        _resolve_llm_params(
+            "local/ollama/llama3.2:latest",
+            reasoning_effort="high",
+            strict=True,
+        )
+
+    assert "Local inference doesn't accept effort='high'" in str(exc.value)
+
+
+def test_invalid_local_ids_are_rejected_before_hf_router():
+    for model_id in ("local/ollama", "local/ollama/", "local/vllm/model"):
+        assert is_valid_model_id(model_id) is False
+        with pytest.raises(ValueError) as exc:
+            _resolve_llm_params(model_id)
+
+        assert "Invalid local model id" in str(exc.value)
+
+
+def test_local_ids_skip_hf_router_catalog(monkeypatch):
+    from agent.core import hf_router_catalog
+
+    def fail_lookup(_model_id):
+        raise AssertionError("local ids must not query HF router catalog")
+
+    monkeypatch.setattr(hf_router_catalog, "lookup", fail_lookup)
+
+    assert _print_hf_routing_info("local/ollama/llama3.2:latest", _Console())
+
+
+def test_local_switch_skips_effort_probe(monkeypatch):
+    async def fail_probe(*_args, **_kwargs):
+        raise AssertionError("local ids must not probe daemon/provider")
+
+    class Session:
+        def __init__(self):
+            self.model_effective_effort: dict[str, str | None] = {}
+            self.model_id = None
+
+        def update_model(self, model_id):
+            self.model_id = model_id
+
+    monkeypatch.setattr("agent.core.model_switcher.probe_effort", fail_probe)
+    config = SimpleNamespace(model_name="openai/gpt-5.5", reasoning_effort="max")
+    session = Session()
+    console = _Console()
+
+    asyncio.run(
+        probe_and_switch_model(
+            "local/llamacpp/qwen3-coder",
+            config,
+            session,
+            console,
+            hf_token=None,
+        )
+    )
+
+    assert session.model_id == "local/llamacpp/qwen3-coder"
+    assert session.model_effective_effort == {"local/llamacpp/qwen3-coder": None}
+    assert all("checking" not in message for message in console.messages)
 
 
 def test_openai_none_effort_is_forwarded_for_current_gpt_models():

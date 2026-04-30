@@ -89,6 +89,12 @@ _OPENAI_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 _HF_EFFORTS = {"low", "medium", "high"}
 
 _PROVIDER_REGISTRY = {
+    "local": ProviderCapability(
+        name="local",
+        prefix="local/",
+        efforts=frozenset(),
+        credential_env=None,
+    ),
     "anthropic": ProviderCapability(
         name="anthropic",
         prefix="anthropic/",
@@ -119,11 +125,55 @@ _PROVIDER_REGISTRY = {
 
 
 def _provider_for_model(model_name: str) -> ProviderCapability:
-    for key in ("anthropic", "bedrock", "openai"):
+    for key in ("local", "anthropic", "bedrock", "openai"):
         provider = _PROVIDER_REGISTRY[key]
         if model_name.startswith(provider.prefix):
             return provider
     return _PROVIDER_REGISTRY["hf_router"]
+
+
+_LOCAL_DUMMY_API_KEY = "local-dummy-key"
+_LOCAL_OPENAI_BASE_URLS = {
+    "ollama": "http://localhost:11434",
+    "llamacpp": "http://localhost:8080",
+}
+
+
+def _normalize_openai_compatible_base_url(base_url: str) -> str:
+    base = base_url.strip().rstrip("/")
+    if base.endswith("/v1"):
+        return base
+    return f"{base}/v1"
+
+
+def _parse_local_model_id(model_name: str) -> tuple[str, str]:
+    parts = model_name.split("/", 2)
+    if len(parts) != 3 or parts[0] != "local":
+        raise ValueError(
+            "Invalid local model id. Expected local/ollama/<model> "
+            "or local/llamacpp/<alias>."
+        )
+
+    runtime, local_model = parts[1], parts[2]
+    if (
+        runtime not in _LOCAL_OPENAI_BASE_URLS
+        or not local_model
+        or local_model != local_model.strip()
+        or local_model.startswith("/")
+    ):
+        raise ValueError(
+            "Invalid local model id. Expected local/ollama/<model> "
+            "or local/llamacpp/<alias>."
+        )
+    return runtime, local_model
+
+
+def is_local_model_id(model_name: str) -> bool:
+    try:
+        _parse_local_model_id(model_name)
+    except ValueError:
+        return False
+    return True
 
 
 class UnsupportedEffortError(ValueError):
@@ -159,6 +209,12 @@ def _resolve_llm_params(
     • ``openai/<model>`` — ``reasoning_effort`` forwarded as a top-level
       kwarg (GPT-5 / o-series). LiteLLM uses the user's ``OPENAI_API_KEY``.
 
+    • ``local/ollama/<model>`` / ``local/llamacpp/<alias>`` — local
+      OpenAI-compatible inference. We send ``model=openai/<name>`` with a
+      normalized ``/v1`` local ``api_base`` and a dummy non-empty
+      ``api_key``. Reasoning effort is not forwarded; local servers vary
+      and should not require any remote credential.
+
     • Anything else is treated as a HuggingFace router id. We hit the
       auto-routing OpenAI-compatible endpoint at
       ``https://router.huggingface.co/v1``. The id can be bare or carry an
@@ -182,6 +238,20 @@ def _resolve_llm_params(
       3. HF_TOKEN env — belt-and-suspenders fallback for CLI users.
     """
     provider = _provider_for_model(model_name)
+
+    if provider.name == "local":
+        runtime, local_model = _parse_local_model_id(model_name)
+        if reasoning_effort and strict:
+            raise UnsupportedEffortError(
+                f"Local inference doesn't accept effort={reasoning_effort!r}"
+            )
+        return {
+            "model": f"openai/{local_model}",
+            "api_base": _normalize_openai_compatible_base_url(
+                _LOCAL_OPENAI_BASE_URLS[runtime]
+            ),
+            "api_key": _LOCAL_DUMMY_API_KEY,
+        }
 
     if provider.name == "anthropic":
         params: dict = {"model": model_name}
