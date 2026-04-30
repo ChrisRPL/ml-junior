@@ -135,6 +135,77 @@ async function testHydrationIgnoresMalformedVerifierCatalogMetadata(): Promise<v
   );
 }
 
+async function testHydrationPreservesBudgetMetadata(): Promise<void> {
+  const durable = snapshot(10, {
+    budget: {
+      source: 'event',
+      status: 'active',
+      currency: 'USD',
+      limit: 100,
+      used: 35,
+      limit_count: 2,
+      usage_count: 1,
+      totals: [{
+        resource: 'llm_tokens',
+        unit: 'tokens',
+        limit: 1000,
+        used: 420,
+        remaining: 580,
+        limit_count: 1,
+        usage_count: 1,
+        status: 'active',
+      }],
+      items: [{
+        type: 'usage',
+        resource: 'llm_tokens',
+        unit: 'tokens',
+        used: 420,
+        status: 'active',
+        tool_call_id: 'tool-1',
+      }],
+      updated_at: '2026-04-30T12:00:00.000Z',
+    },
+  });
+  const fetcher: ProjectSnapshotFetch = async () => response(200, durable);
+
+  const result = await fetchProjectSnapshot('session-1', fetcher);
+  assert(result.ok, 'valid budget metadata should hydrate');
+  assert(
+    result.ok && result.snapshot.budget.totals?.[0]?.resource === 'llm_tokens',
+    'hydration should preserve budget totals',
+  );
+  assert(
+    result.ok && result.snapshot.budget.items[0]?.type === 'usage',
+    'hydration should preserve budget ledger items',
+  );
+  assert(
+    result.ok && result.snapshot.budget.limit_count === 2 && result.snapshot.budget.usage_count === 1,
+    'hydration should preserve budget counts',
+  );
+}
+
+async function testHydrationAllowsMalformedOptionalBudgetMetadata(): Promise<void> {
+  const durable = snapshot(11, {
+    budget: ({
+      ...createEmptyProjectSnapshot('session-1').budget,
+      source: 'event',
+      status: 'active',
+      totals: 'not-total-rows',
+      items: [42, null, { type: 'usage', resource: 'llm_tokens' }],
+      limit_count: 'two',
+      usage_count: { value: 1 },
+    } as unknown) as ProjectSnapshot['budget'],
+  });
+  const fetcher: ProjectSnapshotFetch = async () => response(200, durable);
+
+  const result = await fetchProjectSnapshot('session-1', fetcher);
+  assert(result.ok, 'malformed optional budget details should not reject snapshot');
+  assert(
+    result.ok && result.snapshot.budget.status === 'active',
+    'hydration should keep core budget status when optional budget details are malformed',
+  );
+}
+
 async function testFailedResponseFallback(): Promise<void> {
   const notFoundFetcher: ProjectSnapshotFetch = async () => response(404, { detail: 'not found' });
   const result = await fetchProjectSnapshot('session-1', notFoundFetcher);
@@ -189,11 +260,13 @@ async function run(): Promise<void> {
   await testSuccessfulHydration();
   await testHydrationPreservesVerifierCatalogMetadata();
   await testHydrationIgnoresMalformedVerifierCatalogMetadata();
+  await testHydrationPreservesBudgetMetadata();
+  await testHydrationAllowsMalformedOptionalBudgetMetadata();
   await testFailedResponseFallback();
   await testMalformedPayloadFallback();
   testOlderHydrationDoesNotOverwriteNewerEvents();
 }
 
 run().then(() => {
-  console.log('project-snapshot-api: 6 tests passed');
+  console.log('project-snapshot-api: 8 tests passed');
 });

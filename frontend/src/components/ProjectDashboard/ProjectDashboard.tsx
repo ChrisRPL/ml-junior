@@ -24,6 +24,7 @@ import type {
 } from '@/types/project';
 import type { SessionMeta } from '@/types/agent';
 import ArtifactJobPanel from './ArtifactJobPanel';
+import BudgetTrackingPanel from './BudgetTrackingPanel';
 import EvidenceLedgerPanel from './EvidenceLedgerPanel';
 import FlowCatalogPanel from './FlowCatalogPanel';
 import HandoffNotebookPanel from './HandoffNotebookPanel';
@@ -173,18 +174,19 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
           </Panel>
 
           <Panel title="Budget and tracking" icon={<PlayArrowOutlinedIcon />}>
-            <Stack spacing={0.75}>
-              <StatusLine label="Budget" value={formatBudget(snapshot)} tone={snapshot.budget.status === 'exhausted' ? 'risk' : 'muted'} />
-              <StatusLine label="Source" value={formatSource(snapshot.budget.source)} tone="muted" />
-              {snapshot.live_tracking_refs.map((ref, index) => (
-                <StatusLine
-                  key={ref.id ?? `${ref.provider}:${index}`}
-                  label={ref.provider}
-                  value={ref.enabled ? humanize(ref.status) : 'not active'}
-                  tone={ref.enabled ? 'blue' : 'muted'}
-                />
-              ))}
-              <StatusLine label="Coverage" value={snapshot.compatibility.missing_producers.length > 0 ? 'partial' : 'complete'} tone="muted" />
+            <Stack spacing={1.25}>
+              <BudgetTrackingPanel budget={snapshot.budget} />
+              <Stack spacing={0.75}>
+                {snapshot.live_tracking_refs.map((ref, index) => (
+                  <StatusLine
+                    key={ref.id ?? `${ref.provider}:${index}`}
+                    label={ref.provider}
+                    value={ref.enabled ? humanize(ref.status) : 'not active'}
+                    tone={ref.enabled ? 'blue' : 'muted'}
+                  />
+                ))}
+                <StatusLine label="Coverage" value={snapshot.compatibility.missing_producers.length > 0 ? 'partial' : 'complete'} tone="muted" />
+              </Stack>
             </Stack>
           </Panel>
 
@@ -354,16 +356,4 @@ function humanize(value: string) {
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function formatBudget(snapshot: ProjectSnapshot) {
-  const { budget } = snapshot;
-  if (budget.status === 'placeholder') return 'not tracked';
-  if (budget.limit === null && budget.used === null) return humanize(budget.status);
-  const currency = budget.currency ?? 'units';
-  return `${budget.used ?? 0}/${budget.limit ?? '?'} ${currency}`;
-}
-
-function formatSource(source: string) {
-  return source === 'placeholder' ? 'not tracked' : humanize(source);
 }

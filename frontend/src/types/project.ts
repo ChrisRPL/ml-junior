@@ -118,13 +118,46 @@ export interface HumanRequestRef {
   updated_at?: string | null;
 }
 
+export interface ProjectBudgetTotalRow {
+  [key: string]: unknown;
+  resource?: string | null;
+  unit?: string | null;
+  limit?: number | null;
+  used?: number | null;
+  remaining?: number | null;
+  limit_count?: number | null;
+  usage_count?: number | null;
+  status?: string | null;
+}
+
+export interface ProjectBudgetItemRow {
+  [key: string]: unknown;
+  type?: 'limit' | 'usage' | (string & {});
+  resource?: string | null;
+  unit?: string | null;
+  limit?: number | null;
+  used?: number | null;
+  remaining?: number | null;
+  limit_count?: number | null;
+  usage_count?: number | null;
+  status?: string | null;
+  currency?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  tool_call_id?: string | null;
+  job_id?: string | null;
+}
+
 export interface ProjectBudgetSnapshot {
   source: 'placeholder' | 'event' | 'durable' | (string & {});
   status: 'placeholder' | 'active' | 'exhausted' | 'unknown' | (string & {});
   currency: string | null;
   limit: number | null;
   used: number | null;
-  items: unknown[];
+  limit_count?: number | null;
+  usage_count?: number | null;
+  totals?: ProjectBudgetTotalRow[];
+  items: ProjectBudgetItemRow[];
   updated_at?: string | null;
 }
 
