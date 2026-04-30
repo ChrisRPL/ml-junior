@@ -91,7 +91,12 @@ export default function FlowPreviewDetails({ preview }: { preview: FlowPreviewRe
 
       <PreviewSection title="Verifier checklist definitions" icon={<ChecklistOutlinedIcon />}>
         {preview.verifier_checks.length > 0
-          ? preview.verifier_checks.map((check) => <VerifierRow key={check.id} check={check} />)
+          ? (
+            <Stack spacing={0.75}>
+              <VerifierCoverageSummary preview={preview} />
+              {preview.verifier_checks.map((check) => <VerifierRow key={check.id} check={check} />)}
+            </Stack>
+          )
           : <Placeholder text="No verifier check definitions." />}
       </PreviewSection>
     </Box>
@@ -234,17 +239,53 @@ function RiskyOperationRow({ operation }: { operation: FlowRiskyOperationPreview
   );
 }
 
-function VerifierRow({ check }: { check: FlowVerifierCheckPreview }) {
+function VerifierCoverageSummary({ preview }: { preview: FlowPreviewResponse }) {
+  const coverage = preview.verifier_catalog_coverage;
+  if (!coverage) {
+    return (
+      <Typography variant="caption" sx={{ color: 'var(--muted-text)', overflowWrap: 'anywhere' }}>
+        Catalog mapping metadata not included in this template preview response.
+      </Typography>
+    );
+  }
+
   return (
-    <InfoRow
-      title={check.description}
-      detail={check.id}
-      monoDetail={check.type}
-      chips={[
-        { label: check.required ? 'required' : 'optional', tone: check.required ? 'good' : 'muted' },
-        { label: phaseLabel(check.phase_ids), tone: 'muted', mono: true },
-      ]}
-    />
+    <Box sx={statusLineSx}>
+      <Typography variant="caption" sx={labelSx}>Catalog coverage</Typography>
+      <Stack direction="row" spacing={0.75} sx={{ justifyContent: { xs: 'flex-start', sm: 'flex-end' }, flexWrap: 'wrap', rowGap: 0.75, minWidth: 0 }}>
+        <FlowChip label={`${coverage.mapped_count}/${coverage.verifier_count} mapped`} tone={coverage.unmapped_count > 0 ? 'amber' : 'good'} mono />
+        <FlowChip label={`${coverage.unmapped_count} unmapped`} tone={coverage.unmapped_count > 0 ? 'amber' : 'muted'} mono />
+        {coverage.intentional_unmapped_verifier_ids.length > 0 && (
+          <FlowChip label={`${coverage.intentional_unmapped_verifier_ids.length} intentional`} tone="muted" mono />
+        )}
+        {coverage.unknown_unmapped_verifier_ids.length > 0 && (
+          <FlowChip label={`${coverage.unknown_unmapped_verifier_ids.length} unknown`} tone="risk" mono />
+        )}
+      </Stack>
+    </Box>
+  );
+}
+
+function VerifierRow({ check }: { check: FlowVerifierCheckPreview }) {
+  const catalogLines = verifierCatalogLines(check);
+  const mappingStatus = check.mapping_status ?? 'mapping unavailable';
+
+  return (
+    <Box sx={itemRowSx}>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="body2" sx={{ fontWeight: 650, overflowWrap: 'anywhere' }}>{check.description}</Typography>
+        <Typography variant="body2" sx={{ color: 'var(--muted-text)', overflowWrap: 'anywhere' }}>{check.id}</Typography>
+        <Typography variant="caption" sx={monoLineSx}>{check.type}</Typography>
+        {catalogLines.map((line) => (
+          <Typography key={line} variant="caption" sx={monoLineSx}>{line}</Typography>
+        ))}
+      </Box>
+      <Stack direction="row" spacing={0.75} sx={{ justifyContent: { xs: 'flex-start', sm: 'flex-end' }, flexWrap: 'wrap', rowGap: 0.75 }}>
+        <FlowChip label={check.required ? 'required' : 'optional'} tone={check.required ? 'good' : 'muted'} />
+        <FlowChip label={phaseLabel(check.phase_ids)} tone="muted" mono />
+        <FlowChip label={mappingStatusLabel(mappingStatus)} tone={mappingStatusTone(mappingStatus)} mono />
+      </Stack>
+    </Box>
   );
 }
 
@@ -302,6 +343,41 @@ function riskTone(risk: string): Tone {
   if (['medium', 'moderate'].includes(risk.toLowerCase())) return 'amber';
   if (risk.toLowerCase() === 'low') return 'good';
   return 'muted';
+}
+
+function mappingStatusTone(status: FlowVerifierCheckPreview['mapping_status'] | 'mapping unavailable'): Tone {
+  if (status === 'mapped') return 'good';
+  if (status === 'unknown_unmapped') return 'risk';
+  if (status === 'intentional_unmapped') return 'amber';
+  return 'muted';
+}
+
+function mappingStatusLabel(status: FlowVerifierCheckPreview['mapping_status'] | 'mapping unavailable') {
+  if (status === 'mapped') return 'catalog mapped';
+  if (status === 'intentional_unmapped') return 'intentional local';
+  if (status === 'unknown_unmapped') return 'unknown local';
+  return status;
+}
+
+function verifierCatalogLines(check: FlowVerifierCheckPreview) {
+  const lines: string[] = [];
+  const catalogName = check.catalog_check_name ?? null;
+  const catalogId = check.catalog_check_id ?? null;
+  const catalogParts = [
+    check.catalog_check_category ? `category: ${check.catalog_check_category}` : null,
+    check.catalog_check_type ? `type: ${check.catalog_check_type}` : null,
+  ].filter(Boolean);
+
+  if (catalogName || catalogId) {
+    lines.push(`catalog: ${catalogName ?? catalogId}${catalogId && catalogName ? ` (${catalogId})` : ''}`);
+  }
+  if (catalogParts.length > 0) {
+    lines.push(catalogParts.join(' / '));
+  }
+  if (check.catalog_evidence_ref_types && check.catalog_evidence_ref_types.length > 0) {
+    lines.push(`evidence refs: ${check.catalog_evidence_ref_types.join(', ')}`);
+  }
+  return lines;
 }
 
 function phaseLabel(phaseIds: string[]) {
