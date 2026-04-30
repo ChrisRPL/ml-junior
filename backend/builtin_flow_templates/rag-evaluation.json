@@ -1,0 +1,239 @@
+{
+  "id": "rag-evaluation",
+  "name": "RAG Evaluation",
+  "version": "v1",
+  "description": "Evaluate a retrieval-augmented generation system with dataset, retrieval, answer quality, citation, reliability, and reporting evidence.",
+  "inputs": [
+    {
+      "id": "rag_system",
+      "type": "string",
+      "required": true,
+      "description": "RAG system, prompt, pipeline config, or application endpoint description."
+    },
+    {
+      "id": "eval_dataset",
+      "type": "string",
+      "required": false,
+      "description": "Evaluation dataset, question set, references, or annotation source."
+    },
+    {
+      "id": "retrieval_corpus",
+      "type": "string",
+      "required": false,
+      "description": "Corpus, index, document snapshot, or retrieval data source."
+    },
+    {
+      "id": "primary_metric",
+      "type": "string",
+      "required": false,
+      "default": "answer_relevance",
+      "description": "Primary metric or scoring dimension used to rank results."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 1.0,
+    "max_runs": 6,
+    "max_wall_clock_hours": 12.0,
+    "max_llm_usd": 20.0
+  },
+  "permissions": [
+    {
+      "id": "read-rag-eval-assets",
+      "risk": "low",
+      "action": "read",
+      "target": "rag-config-corpus-eval-data-and-system-metadata",
+      "description": "Read RAG configuration, corpus metadata, evaluation dataset, sample outputs, and benchmark documentation."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-rag-eval-plan",
+      "risk": "low",
+      "action": "approve",
+      "target": "rag-evaluation-plan",
+      "description": "Confirm evaluation objective, dataset, corpus snapshot, metrics, and sampling plan."
+    },
+    {
+      "id": "approve-rag-eval-run",
+      "risk": "medium",
+      "action": "approve",
+      "target": "bounded-rag-evaluation-run-plan",
+      "description": "Confirm bounded run count, model calls, retrieval snapshot, and evidence capture before evaluation starts."
+    },
+    {
+      "id": "publish-rag-eval-results",
+      "risk": "medium",
+      "action": "publish",
+      "target": "rag-evaluation-report-or-results",
+      "description": "Publish evaluation results, report, or benchmark artifacts outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "evaluation-scope",
+      "name": "Evaluation Scope",
+      "objective": "Define target behavior, users, failure modes, retrieval and generation metrics, and acceptance criteria.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["rag-eval-brief"],
+      "approval_points": ["approve-rag-eval-plan"],
+      "verifiers": ["eval-goal-is-testable"]
+    },
+    {
+      "id": "data-and-metrics",
+      "name": "Data And Metrics",
+      "objective": "Document question set, references, corpus snapshot, retrieval metrics, answer scoring, and aggregation.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["eval-dataset-manifest", "metric-spec"],
+      "approval_points": [],
+      "verifiers": ["dataset-fingerprint-captured", "metric-spec-complete"]
+    },
+    {
+      "id": "harness",
+      "name": "Harness",
+      "objective": "Prepare scoring adapters, sample-level result schema, citation checks, and minimal runnable example.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["scoring-code-summary"],
+      "approval_points": [],
+      "verifiers": ["scoring-code-runs"]
+    },
+    {
+      "id": "evaluation-run",
+      "name": "Evaluation Run",
+      "objective": "Record bounded evaluation results, retrieval hits, generated answers, references, and aggregate metrics.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["rag-eval-results", "sample-results"],
+      "approval_points": ["approve-rag-eval-run"],
+      "verifiers": ["metric-recorded", "baseline-compared"]
+    },
+    {
+      "id": "reliability",
+      "name": "Reliability",
+      "objective": "Review sample failures, retrieval misses, citation gaps, metric sensitivity, and reproducibility caveats.",
+      "status": "pending",
+      "order": 5,
+      "required_outputs": ["reliability-report"],
+      "approval_points": [],
+      "verifiers": ["reliability-checked"]
+    },
+    {
+      "id": "report",
+      "name": "Report",
+      "objective": "Package evaluation findings, limitations, sample evidence, and optional publication notes.",
+      "status": "pending",
+      "order": 6,
+      "required_outputs": ["rag-eval-report", "verifier-verdict"],
+      "approval_points": ["publish-rag-eval-results"],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "rag-eval-brief",
+      "type": "markdown",
+      "description": "Evaluation objective, user needs, failure modes, metrics, and acceptance criteria."
+    },
+    {
+      "id": "eval-dataset-manifest",
+      "type": "manifest",
+      "description": "Question set, references, corpus snapshot, split mapping, and fingerprint."
+    },
+    {
+      "id": "metric-spec",
+      "type": "markdown",
+      "description": "Retrieval, answer, citation, aggregation, and threshold definitions."
+    },
+    {
+      "id": "scoring-code-summary",
+      "type": "markdown",
+      "description": "Scoring adapters, task configuration, result schema, and minimal example notes."
+    },
+    {
+      "id": "rag-eval-results",
+      "type": "metrics",
+      "description": "Aggregate retrieval, answer quality, citation, and baseline comparison metrics."
+    },
+    {
+      "id": "sample-results",
+      "type": "jsonl",
+      "description": "Sample-level questions, retrieved contexts, answers, references, scores, and failure tags."
+    },
+    {
+      "id": "reliability-report",
+      "type": "markdown",
+      "description": "Reliability, sample failure, citation, and metric sensitivity findings."
+    },
+    {
+      "id": "rag-eval-report",
+      "type": "markdown",
+      "description": "Final RAG evaluation report and limitations."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "rag-eval-suite",
+      "type": "code",
+      "description": "Evaluation task and scoring implementation or configuration."
+    },
+    {
+      "id": "rag-eval-results-jsonl",
+      "type": "jsonl",
+      "description": "Sample-level RAG evaluation results."
+    },
+    {
+      "id": "rag-eval-summary",
+      "type": "json",
+      "description": "Aggregate retrieval, answer, citation, and comparison metrics."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "eval-goal-is-testable",
+      "type": "manual",
+      "description": "RAG evaluation objective maps to observable examples, metrics, and acceptance criteria."
+    },
+    {
+      "id": "dataset-fingerprint-captured",
+      "type": "artifact",
+      "description": "Evaluation dataset, references, corpus snapshot, split mapping, and fingerprint are recorded."
+    },
+    {
+      "id": "metric-spec-complete",
+      "type": "artifact",
+      "description": "Retrieval, answer, citation, aggregation, and threshold metrics are documented."
+    },
+    {
+      "id": "scoring-code-runs",
+      "type": "command",
+      "description": "Scoring code or configuration runs on a minimal example and emits expected fields."
+    },
+    {
+      "id": "metric-recorded",
+      "type": "metric",
+      "description": "Evaluation metrics include dataset or split, value, run id, and aggregation field."
+    },
+    {
+      "id": "baseline-compared",
+      "type": "metric",
+      "description": "RAG result is compared against a baseline retriever, prompt, or reference system."
+    },
+    {
+      "id": "reliability-checked",
+      "type": "manual",
+      "description": "Sample failures, retrieval misses, citation gaps, and metric sensitivity were reviewed."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final report claims cite aggregate metrics, sample results, corpus metadata, and reliability notes."
+    }
+  ]
+}

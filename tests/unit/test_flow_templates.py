@@ -22,9 +22,11 @@ BUILTIN_DIR = Path(__file__).resolve().parent.parent.parent / "backend" / "built
 EXPECTED_BUILTIN_IDS = [
     "build-evaluation-harness",
     "compare-models",
+    "create-model-card",
     "dataset-audit",
     "dataset-card-review",
     "debug-failed-training-run",
+    "distill-model",
     "fine-tune-model",
     "hyperparameter-sweep",
     "implement-architecture",
@@ -32,6 +34,8 @@ EXPECTED_BUILTIN_IDS = [
     "metric-selection-review",
     "model-card-refresh",
     "paper-to-implementation-plan",
+    "publish-to-hub",
+    "rag-evaluation",
     "reproduce-paper",
 ]
 
@@ -257,14 +261,34 @@ def test_builtin_template_families_cover_required_gate_paths() -> None:
         for phase in templates["compare-models"].phases
         for approval_id in phase.approval_points
     }
+    assert "approve-card-scope" in {
+        approval_id
+        for phase in templates["create-model-card"].phases
+        for approval_id in phase.approval_points
+    }
     assert "approve-debug-scope" in {
         approval_id
         for phase in templates["debug-failed-training-run"].phases
         for approval_id in phase.approval_points
     }
+    assert "approve-distillation-plan" in {
+        approval_id
+        for phase in templates["distill-model"].phases
+        for approval_id in phase.approval_points
+    }
     assert "approve-sweep-plan" in {
         approval_id
         for phase in templates["hyperparameter-sweep"].phases
+        for approval_id in phase.approval_points
+    }
+    assert "approve-publication-scope" in {
+        approval_id
+        for phase in templates["publish-to-hub"].phases
+        for approval_id in phase.approval_points
+    }
+    assert "approve-rag-eval-plan" in {
+        approval_id
+        for phase in templates["rag-evaluation"].phases
         for approval_id in phase.approval_points
     }
 

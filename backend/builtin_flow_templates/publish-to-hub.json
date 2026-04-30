@@ -1,0 +1,193 @@
+{
+  "id": "publish-to-hub",
+  "name": "Publish To Hub",
+  "version": "v1",
+  "description": "Prepare a model, dataset, or evaluation package for Hub publication with artifact inventory, metadata checks, card evidence, and approval points.",
+  "inputs": [
+    {
+      "id": "package_path",
+      "type": "string",
+      "required": true,
+      "description": "Local artifact directory, checkpoint, dataset export, or evaluation package to prepare."
+    },
+    {
+      "id": "repository_id",
+      "type": "string",
+      "required": true,
+      "description": "Target repository id or planned namespace and name."
+    },
+    {
+      "id": "repository_type",
+      "type": "string",
+      "required": false,
+      "default": "model",
+      "description": "Repository type such as model, dataset, or space."
+    },
+    {
+      "id": "visibility",
+      "type": "string",
+      "required": false,
+      "default": "private",
+      "description": "Planned repository visibility for publication review."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 0.0,
+    "max_runs": 0,
+    "max_wall_clock_hours": 4.0,
+    "max_llm_usd": 5.0
+  },
+  "permissions": [
+    {
+      "id": "read-package-assets",
+      "risk": "low",
+      "action": "read",
+      "target": "local-package-card-metadata-and-artifact-manifest",
+      "description": "Read local package files, card drafts, metadata, license text, metrics, and artifact manifests."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-publication-scope",
+      "risk": "low",
+      "action": "approve",
+      "target": "hub-publication-scope",
+      "description": "Confirm repository target, visibility, license, included artifacts, and known gaps."
+    },
+    {
+      "id": "approve-hub-publication",
+      "risk": "high",
+      "action": "publish",
+      "target": "huggingface-hub-repository",
+      "description": "Publish package artifacts, metadata, card content, or evaluation results outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "publication-scope",
+      "name": "Publication Scope",
+      "objective": "Capture repository target, artifact type, visibility, license, intended audience, and publication non-goals.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["publication-brief"],
+      "approval_points": ["approve-publication-scope"],
+      "verifiers": ["model-choice-justified"]
+    },
+    {
+      "id": "artifact-inventory",
+      "name": "Artifact Inventory",
+      "objective": "Inventory package files, config, model or dataset revisions, metrics, size-sensitive assets, and missing metadata.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["artifact-inventory", "config-summary"],
+      "approval_points": [],
+      "verifiers": ["environment-captured", "training-config-complete"]
+    },
+    {
+      "id": "card-and-metadata",
+      "name": "Card And Metadata",
+      "objective": "Review card content, metadata fields, tags, license, intended use, limitations, and metric evidence.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["model-card", "metric-summary"],
+      "approval_points": [],
+      "verifiers": ["model-card-complete", "metric-recorded"]
+    },
+    {
+      "id": "publication-readiness",
+      "name": "Publication Readiness",
+      "objective": "Prepare upload manifest, final caveats, rollback notes, and evidence-backed publication decision.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["hub-publication-report", "verifier-verdict"],
+      "approval_points": ["approve-hub-publication"],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "publication-brief",
+      "type": "markdown",
+      "description": "Repository target, artifact type, visibility, license, audience, and non-goals."
+    },
+    {
+      "id": "artifact-inventory",
+      "type": "manifest",
+      "description": "Package files, sizes, revisions, config files, and included artifact classes."
+    },
+    {
+      "id": "config-summary",
+      "type": "json",
+      "description": "Relevant config, environment, tokenizer, dataset, or evaluation metadata required for publication."
+    },
+    {
+      "id": "model-card",
+      "type": "markdown",
+      "description": "Repository README or card content ready for review."
+    },
+    {
+      "id": "metric-summary",
+      "type": "metrics",
+      "description": "Evaluation metrics, dataset or split references, and source evidence when available."
+    },
+    {
+      "id": "hub-publication-report",
+      "type": "markdown",
+      "description": "Publication decision, caveats, unresolved gaps, and approval notes."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "upload-manifest",
+      "type": "manifest",
+      "description": "Planned files, paths, metadata, and publication disposition."
+    },
+    {
+      "id": "repository-card",
+      "type": "markdown",
+      "description": "README.md or card content prepared for the repository."
+    },
+    {
+      "id": "publication-checklist",
+      "type": "markdown",
+      "description": "Publication checks, approvals, caveats, and rollback notes."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "model-choice-justified",
+      "type": "manual",
+      "description": "Repository target, artifact type, license, and publication scope are documented."
+    },
+    {
+      "id": "environment-captured",
+      "type": "artifact",
+      "description": "Relevant package environment, revisions, dependency metadata, and config context are captured."
+    },
+    {
+      "id": "training-config-complete",
+      "type": "artifact",
+      "description": "Model, dataset, tokenizer, evaluation, or packaging config required to interpret the artifacts is captured."
+    },
+    {
+      "id": "model-card-complete",
+      "type": "artifact",
+      "description": "Repository card includes intended use, limitations, artifacts, datasets, metrics, and license context."
+    },
+    {
+      "id": "metric-recorded",
+      "type": "metric",
+      "description": "Available metrics include task, dataset or split, value, and source reference."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Publication decision and card claims cite manifest, card metadata, metrics, configs, or explicit gaps."
+    }
+  ]
+}

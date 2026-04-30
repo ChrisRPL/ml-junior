@@ -165,6 +165,11 @@ _BUILTIN_FLOW_RESPONSE_METADATA: dict[str, dict[str, Any]] = {
         "runtime_class": "model_comparison",
         "tags": ["evaluation", "models", "comparison", "metrics"],
     },
+    "create-model-card": {
+        "category": "documentation",
+        "runtime_class": "model_card_creation",
+        "tags": ["model-cards", "documentation", "metadata", "hub"],
+    },
     "dataset-audit": {
         "category": "data",
         "runtime_class": "data_audit",
@@ -179,6 +184,11 @@ _BUILTIN_FLOW_RESPONSE_METADATA: dict[str, dict[str, Any]] = {
         "category": "training",
         "runtime_class": "training_debug_review",
         "tags": ["training", "debugging", "logs", "reproducibility"],
+    },
+    "distill-model": {
+        "category": "training",
+        "runtime_class": "distillation_review",
+        "tags": ["distillation", "models", "evaluation", "packaging"],
     },
     "fine-tune-model": {
         "category": "training",
@@ -214,6 +224,16 @@ _BUILTIN_FLOW_RESPONSE_METADATA: dict[str, dict[str, Any]] = {
         "category": "research",
         "runtime_class": "implementation_planning",
         "tags": ["papers", "planning", "architecture", "evidence"],
+    },
+    "publish-to-hub": {
+        "category": "packaging",
+        "runtime_class": "hub_publication_review",
+        "tags": ["hub", "packaging", "model-cards", "artifacts"],
+    },
+    "rag-evaluation": {
+        "category": "evaluation",
+        "runtime_class": "rag_evaluation",
+        "tags": ["rag", "evaluation", "retrieval", "metrics"],
     },
     "reproduce-paper": {
         "category": "research",

@@ -20,9 +20,11 @@ from agent.core.flow_commands import (
 EXPECTED_BUILTIN_IDS = [
     "build-evaluation-harness",
     "compare-models",
+    "create-model-card",
     "dataset-audit",
     "dataset-card-review",
     "debug-failed-training-run",
+    "distill-model",
     "fine-tune-model",
     "hyperparameter-sweep",
     "implement-architecture",
@@ -30,6 +32,8 @@ EXPECTED_BUILTIN_IDS = [
     "metric-selection-review",
     "model-card-refresh",
     "paper-to-implementation-plan",
+    "publish-to-hub",
+    "rag-evaluation",
     "reproduce-paper",
 ]
 

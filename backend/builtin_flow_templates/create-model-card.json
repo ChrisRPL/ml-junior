@@ -1,0 +1,188 @@
+{
+  "id": "create-model-card",
+  "name": "Create Model Card",
+  "version": "v1",
+  "description": "Create a model card from model metadata, training context, evaluation evidence, limitations, and publication caveats.",
+  "inputs": [
+    {
+      "id": "model",
+      "type": "string",
+      "required": true,
+      "description": "Model identifier, checkpoint path, or repository target."
+    },
+    {
+      "id": "task",
+      "type": "string",
+      "required": false,
+      "description": "Task, modality, or intended use context for the model."
+    },
+    {
+      "id": "dataset",
+      "type": "string",
+      "required": false,
+      "description": "Training or evaluation dataset identifier, card URL, or manifest."
+    },
+    {
+      "id": "eval_results",
+      "type": "string",
+      "required": false,
+      "description": "Evaluation results file, report, benchmark reference, or metric summary."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 0.0,
+    "max_runs": 0,
+    "max_wall_clock_hours": 4.0,
+    "max_llm_usd": 6.0
+  },
+  "permissions": [
+    {
+      "id": "read-card-inputs",
+      "risk": "low",
+      "action": "read",
+      "target": "model-dataset-eval-and-license-metadata",
+      "description": "Read model metadata, dataset references, evaluation summaries, license text, and existing repository metadata."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-card-scope",
+      "risk": "low",
+      "action": "approve",
+      "target": "model-card-scope",
+      "description": "Confirm model identity, intended use, evidence sources, and known gaps before drafting."
+    },
+    {
+      "id": "approve-model-card-draft",
+      "risk": "low",
+      "action": "approve",
+      "target": "model-card-draft",
+      "description": "Confirm the draft sections, caveats, and unresolved evidence gaps before handoff."
+    },
+    {
+      "id": "publish-model-card",
+      "risk": "high",
+      "action": "publish",
+      "target": "model-card-update",
+      "description": "Publish model card content outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "card-scope",
+      "name": "Card Scope",
+      "objective": "Capture model identity, license, intended use, out-of-scope use, and card audience.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["model-card-brief"],
+      "approval_points": ["approve-card-scope"],
+      "verifiers": ["model-choice-justified"]
+    },
+    {
+      "id": "evidence-assembly",
+      "name": "Evidence Assembly",
+      "objective": "Collect dataset lineage, training context, evaluation metrics, limitations, and missing evidence.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["model-evidence-table", "metric-summary"],
+      "approval_points": [],
+      "verifiers": ["dataset-fingerprint-captured", "metric-recorded"]
+    },
+    {
+      "id": "draft-card",
+      "name": "Draft Card",
+      "objective": "Draft card metadata and sections for model details, intended use, training data, metrics, limitations, and caveats.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["model-card-draft"],
+      "approval_points": ["approve-model-card-draft"],
+      "verifiers": ["model-card-complete"]
+    },
+    {
+      "id": "handoff",
+      "name": "Handoff",
+      "objective": "Prepare final README content, patch notes, publication decision, and evidence-backed verifier summary.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["model-card", "verifier-verdict"],
+      "approval_points": ["publish-model-card"],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "model-card-brief",
+      "type": "markdown",
+      "description": "Model identity, purpose, license, intended use, audience, and card scope."
+    },
+    {
+      "id": "model-evidence-table",
+      "type": "table",
+      "description": "Model claims mapped to datasets, metrics, reports, repository metadata, or explicit gaps."
+    },
+    {
+      "id": "metric-summary",
+      "type": "metrics",
+      "description": "Evaluation metrics with task, dataset or split, value, and source reference."
+    },
+    {
+      "id": "model-card-draft",
+      "type": "markdown",
+      "description": "Draft model card sections and metadata."
+    },
+    {
+      "id": "model-card",
+      "type": "markdown",
+      "description": "Hub-compatible README.md model card content."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "model-card-readme",
+      "type": "markdown",
+      "description": "README.md model card draft with metadata."
+    },
+    {
+      "id": "model-card-metadata",
+      "type": "yaml",
+      "description": "Model card front matter or repository metadata block."
+    },
+    {
+      "id": "card-evidence-table",
+      "type": "table",
+      "description": "Evidence and gap table used to support card claims."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "model-choice-justified",
+      "type": "manual",
+      "description": "Model identity, intended use, license, and compatibility context are documented."
+    },
+    {
+      "id": "dataset-fingerprint-captured",
+      "type": "artifact",
+      "description": "Training or evaluation dataset source, revision, split mapping, and fingerprint are recorded when available."
+    },
+    {
+      "id": "metric-recorded",
+      "type": "metric",
+      "description": "Evaluation metrics include task, dataset or split, value, and source reference."
+    },
+    {
+      "id": "model-card-complete",
+      "type": "artifact",
+      "description": "Model card includes intended use, limitations, datasets, training parameters, and evaluation results."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final model card claims cite evidence table entries, metric summaries, repository metadata, or explicit gaps."
+    }
+  ]
+}
