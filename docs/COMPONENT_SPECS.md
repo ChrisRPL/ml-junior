@@ -223,19 +223,22 @@ Current behavior:
   caller-supplied dataset manifests, diffs, lineage DAGs, and content-addressed
   blob paths; keep provenance primitives inert until runtime producers exist.
 - Inputs: caller-supplied budget limit/usage records, dataset manifest records,
-  lineage graph records, and sha256 blob digests.
+  lineage graph records, run-level manifest/lineage refs, and sha256 blob
+  digests.
 - Outputs: redacted append-only budget ledger rows, deterministic manifest
-  diffs, validated lineage graphs, and conventional `~/.mlj/blobs/sha256/...`
-  paths.
+  diffs, validated lineage graphs, explicit run-level dataset refs, and
+  conventional `~/.mlj/blobs/sha256/...` paths.
 - Persistence: the budget ledger has an append-only SQLite store for explicit
   records. Dataset lineage and blob helpers are pure models/path conventions
   and perform no filesystem or network I/O.
 - Failure modes: duplicate budget records are rejected by
   `(session_id, record_id, source_event_sequence)`; invalid lineage graphs
-  reject duplicate/unknown parents and cycles; malformed or weak digests are
-  rejected before path derivation.
+  reject duplicate/unknown parents and cycles; run-level dataset refs reject
+  unknown fields and empty ids; malformed or weak digests are rejected before
+  path derivation.
 - Tests: `tests/unit/test_budget_ledger.py`,
-  `tests/unit/test_dataset_lineage.py`, and `tests/unit/test_dataset_blobs.py`.
+  `tests/unit/test_dataset_lineage.py`, `tests/unit/test_dataset_blobs.py`,
+  `tests/unit/test_experiment_ledger.py`, and `tests/unit/test_agent_events.py`.
 
 Target behavior:
 

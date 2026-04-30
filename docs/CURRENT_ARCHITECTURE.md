@@ -270,8 +270,11 @@ Current behavior:
   artifact discovery, routes, or workflow producers yet.
 - Dataset lineage currently exists as closed, caller-supplied manifest/diff
   models, an inert transform/filter/augment/merge lineage DAG schema, and pure
-  sha256 blob digest/path conventions. It does not walk files, read/write blob
-  caches, call datasets/HF services, or emit runtime events.
+  sha256 blob digest/path conventions. Experiment run records can reference
+  dataset manifests and lineage ids directly as explicit schema-only refs,
+  alongside existing dataset snapshot refs. This does not create snapshots,
+  infer lineage, walk files, read/write blob caches, call datasets/HF services,
+  or emit runtime events.
 - Built-in flow templates live under `backend/builtin_flow_templates/`.
   `GET /api/flows` returns the read-only catalog. `GET
   /api/flows/{template_id}/preview` returns inputs, required inputs, budgets,
