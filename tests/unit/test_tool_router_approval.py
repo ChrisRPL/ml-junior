@@ -103,18 +103,31 @@ def test_needs_approval_hf_jobs_cpu_and_read_only_operations(
 @pytest.mark.parametrize(
     "tool_args",
     [
-        {"operation": "run"},
         {"operation": "run", "hardware_flavor": "cpu-basic"},
         {"operation": "uv", "flavor": "cpu-basic"},
-        {"operation": "scheduled uv", "hardware": "cpu-basic"},
     ],
 )
-def test_needs_approval_hf_jobs_cpu_respects_confirm_cpu_jobs_false(
+def test_needs_approval_hf_jobs_explicit_cpu_respects_confirm_cpu_jobs_false(
     tool_args: dict[str, Any],
 ):
     config = config_for_approval(confirm_cpu_jobs=False)
 
     assert _needs_approval("hf_jobs", tool_args, config) is False
+
+
+@pytest.mark.parametrize(
+    "tool_args",
+    [
+        {"operation": "run"},
+        {"operation": "scheduled uv", "hardware": "cpu-basic"},
+    ],
+)
+def test_needs_approval_hf_jobs_unknown_or_scheduled_jobs_stay_gated(
+    tool_args: dict[str, Any],
+):
+    config = config_for_approval(confirm_cpu_jobs=False)
+
+    assert _needs_approval("hf_jobs", tool_args, config) is True
 
 
 @pytest.mark.parametrize("hardware_key", ["hardware_flavor", "flavor", "hardware"])

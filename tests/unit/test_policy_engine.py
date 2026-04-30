@@ -108,20 +108,23 @@ def test_hf_repo_git_destructive_operations_require_approval(operation: str) -> 
 def test_hf_job_cpu_obeys_confirm_cpu_jobs() -> None:
     approved = PolicyEngine.evaluate(
         "hf_jobs",
-        {"operation": "run", "hardware_flavor": "cpu-basic"},
+        {"operation": "run", "hardware_flavor": "cpu-basic", "timeout": "30m"},
         config_for_policy(),
     )
     auto_cpu = PolicyEngine.evaluate(
         "hf_jobs",
-        {"operation": "uv", "flavor": "cpu-upgrade"},
+        {"operation": "uv", "flavor": "cpu-upgrade", "timeout": "1h"},
         config_for_policy(confirm_cpu_jobs=False),
     )
 
     assert approved.requires_approval is True
     assert approved.risk is RiskLevel.MEDIUM
-    assert approved.budget_impact
+    assert "Estimated cpu-basic cpu spend" in approved.budget_impact
+    assert "about $0.01 for 30m" in approved.budget_impact
+    assert "spend=nominal" in approved.reason
     assert auto_cpu.requires_approval is False
     assert auto_cpu.risk is RiskLevel.MEDIUM
+    assert "about $0.03 for 1h" in auto_cpu.budget_impact
     assert "confirm_cpu_jobs=false" in auto_cpu.reason
 
 
@@ -135,8 +138,60 @@ def test_hf_job_gpu_always_requires_approval(hardware_key: str) -> None:
 
     assert decision.requires_approval is True
     assert decision.risk is RiskLevel.HIGH
-    assert "GPU" in decision.budget_impact
+    assert "Estimated a10g-large single_gpu spend" in decision.budget_impact
+    assert "Recurring schedule" in decision.budget_impact
+    assert "scheduled recurrence requires approval" in decision.reason
     assert decision.credential_usage
+
+
+def test_hf_job_scheduled_cpu_stays_gated_when_cpu_confirmation_disabled() -> None:
+    decision = PolicyEngine.evaluate(
+        "hf_jobs",
+        {"operation": "scheduled run", "hardware_flavor": "cpu-upgrade"},
+        config_for_policy(confirm_cpu_jobs=False),
+    )
+
+    assert decision.requires_approval is True
+    assert decision.risk is RiskLevel.HIGH
+    assert "cpu-upgrade cpu spend" in decision.budget_impact
+    assert "recurrence_multiplier_unknown" in decision.reason
+
+
+def test_hf_job_multi_gpu_exposes_critical_budget_copy() -> None:
+    decision = PolicyEngine.evaluate(
+        "hf_jobs",
+        {"operation": "run", "hardware": "a100x8", "timeout": "2h"},
+        config_for_policy(confirm_cpu_jobs=False),
+    )
+
+    assert decision.requires_approval is True
+    assert decision.risk is RiskLevel.CRITICAL
+    assert "about $40.00 for 2h" in decision.budget_impact
+    assert "multi_gpu" in decision.reason
+    assert "spend=high" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "tool_args",
+    [
+        {"operation": "run", "hardware_flavor": "future-h200x8", "timeout": "1h"},
+        {"operation": "run"},
+    ],
+)
+def test_hf_job_unknown_or_missing_hardware_does_not_inherit_cpu_skip(
+    tool_args: dict[str, Any]
+) -> None:
+    decision = PolicyEngine.evaluate(
+        "hf_jobs",
+        tool_args,
+        config_for_policy(confirm_cpu_jobs=False),
+    )
+
+    assert decision.requires_approval is True
+    assert decision.risk is RiskLevel.UNKNOWN
+    assert "Unknown HF compute spend" in decision.budget_impact
+    assert "unknown_hardware" in decision.reason
+    assert "confirm_cpu_jobs=false" not in decision.reason
 
 
 def test_hub_publish_and_private_upload_policy() -> None:

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from agent.tools.jobs_tool import CPU_FLAVORS
+from agent.core.hf_compute_risk import HfComputeRisk, assess_hf_compute_risk
 from agent.tools.local_guardrails import evaluate_local_policy_failure
 
 
@@ -258,43 +258,35 @@ class PolicyEngine:
 
     @classmethod
     def _evaluate_hf_jobs(cls, tool_args: dict[str, Any], config: Any) -> PolicyDecision:
-        operation = tool_args.get("operation", "")
+        compute_risk = assess_hf_compute_risk(tool_args)
+        operation = compute_risk.operation
         if operation not in cls.JOB_CREATE_OPERATIONS:
             return PolicyDecision(
                 requires_approval=False,
                 risk=RiskLevel.READ_ONLY,
+                budget_impact=compute_risk.budget_impact,
                 credential_usage=["hf_token"],
                 reason="Hugging Face job read/status operation.",
             )
 
-        hardware_flavor = (
-            tool_args.get("hardware_flavor")
-            or tool_args.get("flavor")
-            or tool_args.get("hardware")
-            or "cpu-basic"
-        )
-        is_cpu_job = hardware_flavor in CPU_FLAVORS
+        is_cpu_job = compute_risk.hardware_category == "cpu"
         requires_approval = True
-        reason = "Hugging Face job launch requires approval."
-        risk = RiskLevel.HIGH
-        budget_impact = "May incur GPU compute costs."
+        reason = _hf_jobs_reason(compute_risk)
 
-        if is_cpu_job:
+        if is_cpu_job and not compute_risk.is_scheduled:
             requires_approval = _config_bool(config, "confirm_cpu_jobs", True)
-            risk = RiskLevel.MEDIUM
-            budget_impact = "May incur CPU compute costs."
             reason = (
-                "CPU job launch requires approval."
+                f"CPU job launch requires approval. {reason}"
                 if requires_approval
-                else "CPU job approval disabled by confirm_cpu_jobs=false."
+                else f"CPU job approval disabled by confirm_cpu_jobs=false. {reason}"
             )
 
         return PolicyDecision(
             requires_approval=requires_approval,
-            risk=risk,
+            risk=RiskLevel(compute_risk.risk_tier),
             side_effects=["Starts or schedules a Hugging Face compute job."],
             rollback="Cancel the job or delete the scheduled job.",
-            budget_impact=budget_impact,
+            budget_impact=compute_risk.budget_impact,
             credential_usage=["hf_token"],
             reason=reason,
         )
@@ -468,6 +460,25 @@ def _config_str(config: Any, attr: str, default: str) -> str:
     if value is None:
         return default
     return str(value).strip().lower()
+
+
+def _hf_jobs_reason(compute_risk: HfComputeRisk) -> str:
+    parts = [
+        f"Hugging Face job launch risk: {compute_risk.hardware_category}",
+        f"spend={compute_risk.spend_class}",
+    ]
+    if compute_risk.duration_estimate is not None:
+        parts.append(
+            f"duration={compute_risk.duration_estimate}"
+            f" ({compute_risk.duration_source})"
+        )
+    if compute_risk.is_scheduled:
+        parts.append("scheduled recurrence requires approval")
+    if compute_risk.uncertainty_flags:
+        parts.append(
+            "uncertainty=" + ", ".join(compute_risk.uncertainty_flags)
+        )
+    return "; ".join(parts) + "."
 
 
 def _coerce_risk(value: RiskLevel | str | None) -> RiskLevel | None:
