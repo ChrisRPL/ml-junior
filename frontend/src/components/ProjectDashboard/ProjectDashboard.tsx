@@ -2,7 +2,6 @@ import {
   Alert,
   Box,
   Chip,
-  Link,
   Stack,
   Typography,
 } from '@mui/material';
@@ -16,7 +15,6 @@ import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
 import type {
-  ActiveJobRef,
   HumanRequestRef,
   OperationRef,
   PendingApprovalRef,
@@ -25,6 +23,7 @@ import type {
   ProjectSnapshot,
 } from '@/types/project';
 import type { SessionMeta } from '@/types/agent';
+import ArtifactJobPanel from './ArtifactJobPanel';
 import EvidenceLedgerPanel from './EvidenceLedgerPanel';
 import FlowCatalogPanel from './FlowCatalogPanel';
 import {
@@ -86,6 +85,8 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
 
   const warnings = snapshot.compatibility.warnings ?? [];
   const stale = snapshot.compatibility.stale || snapshot.resume.stale_snapshot || snapshot.status === 'stale';
+  const runningOperationCount = runningOperations(snapshot.operation_refs).length;
+  const activeWorkCount = snapshot.active_jobs.length + runningOperationCount;
 
   return (
     <DashboardFrame>
@@ -114,7 +115,7 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
       <Box sx={overviewGridSx}>
         <Metric title="Current phase" value={snapshot.phase.label} detail={humanize(snapshot.phase.status)} tone={phaseTone(snapshot.phase.status)} />
         <Metric title="Approvals" value={snapshot.pending_approvals.length} detail={snapshot.status === 'waiting_approval' ? 'blocked' : 'pending'} tone={snapshot.pending_approvals.length > 0 ? 'amber' : 'muted'} />
-        <Metric title="Active jobs/tools" value={snapshot.active_jobs.length + runningOperations(snapshot.operation_refs).length} detail="running" tone={snapshot.active_jobs.length > 0 ? 'blue' : 'muted'} />
+        <Metric title="Active jobs/tools" value={activeWorkCount} detail="running" tone={activeWorkCount > 0 ? 'blue' : 'muted'} />
         <Metric title="Resume" value={snapshot.resume.can_resume ? 'ready' : 'not yet'} detail={`seq ${snapshot.resume.event_sequence}`} tone={snapshot.resume.can_resume ? 'good' : 'muted'} mono />
       </Box>
 
@@ -145,15 +146,8 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
             </Stack>
           </Panel>
 
-          <Panel title="Jobs and tools" icon={<MemoryOutlinedIcon />}>
-            <Stack spacing={0}>
-              {snapshot.active_jobs.length > 0
-                ? snapshot.active_jobs.map((job) => <JobRow key={`${job.tool_call_id}:${job.job_id ?? job.status}`} job={job} />)
-                : <Placeholder text="No active jobs." />}
-              {snapshot.operation_refs.length > 0
-                ? snapshot.operation_refs.slice(0, 5).map((operation) => <OperationRow key={operation.id} operation={operation} />)
-                : <Placeholder text="No recent tools." compact />}
-            </Stack>
+          <Panel title="Artifact/job monitor" icon={<MemoryOutlinedIcon />}>
+            <ArtifactJobPanel snapshot={snapshot} />
           </Panel>
         </Stack>
 
@@ -288,22 +282,6 @@ function HumanWaitRow({ request }: { request: HumanRequestRef }) {
 
 function ApprovalRow({ approval }: { approval: PendingApprovalRef }) {
   return <Row title={approval.reason ?? `Approval required for ${approval.tool ?? 'tool'}`} meta={`${approval.tool_call_id}${approval.risk ? ` / ${approval.risk}` : ''}`} tone="amber" mono />;
-}
-
-function JobRow({ job }: { job: ActiveJobRef }) {
-  return (
-    <Row
-      title={job.tool ?? 'tool'}
-      meta={job.url ? <Link href={job.url} target="_blank" rel="noreferrer">{job.status}</Link> : job.status}
-      tone={job.tool === 'hf_jobs' ? 'blue' : 'amber'}
-      id={job.job_id ?? job.tool_call_id}
-      mono
-    />
-  );
-}
-
-function OperationRow({ operation }: { operation: OperationRef }) {
-  return <Row title={`${operation.type}: ${operation.tool ?? operation.id}`} meta={operation.status} tone={operation.status === 'failed' ? 'risk' : operation.status === 'succeeded' ? 'good' : 'muted'} id={operation.id} mono />;
 }
 
 function Row({ title, meta, tone, id, mono }: { title: string; meta: ReactNode; tone: Tone; id?: string; mono?: boolean }) {
