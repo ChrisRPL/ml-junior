@@ -26,6 +26,7 @@ import type { SessionMeta } from '@/types/agent';
 import ArtifactJobPanel from './ArtifactJobPanel';
 import EvidenceLedgerPanel from './EvidenceLedgerPanel';
 import FlowCatalogPanel from './FlowCatalogPanel';
+import HandoffNotebookPanel from './HandoffNotebookPanel';
 import {
   alertSx,
   dashboardGridSx,
@@ -125,6 +126,8 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
 
       <Box sx={dashboardGridSx}>
         <Stack spacing={1.5}>
+          <HandoffNotebookPanel snapshot={snapshot} />
+
           <Panel title="Plan" icon={<PendingActionsOutlinedIcon />}>
             {snapshot.plan.length > 0 ? (
               <Stack spacing={0}>
