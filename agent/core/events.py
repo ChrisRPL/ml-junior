@@ -229,6 +229,15 @@ class ExperimentDatasetSnapshotRefPayload(ExperimentLedgerPayload):
     digest: NonEmptyStr | None = None
 
 
+class ExperimentDatasetManifestRefPayload(ExperimentLedgerPayload):
+    manifest_id: NonEmptyStr
+
+
+class ExperimentDatasetLineageRefPayload(ExperimentLedgerPayload):
+    lineage_id: NonEmptyStr
+    node_id: NonEmptyStr | None = None
+
+
 class ExperimentCodeSnapshotRefPayload(ExperimentLedgerPayload):
     snapshot_id: NonEmptyStr
     source: Literal["git", "archive", "local_path", "event_ref"]
@@ -379,6 +388,12 @@ class ExperimentRunRecordedPayload(ExperimentLedgerPayload):
     source_event_sequence: int | None = Field(default=None, ge=1)
     phase_id: NonEmptyStr | None = None
     dataset_snapshot_refs: list[ExperimentDatasetSnapshotRefPayload] = Field(
+        default_factory=list
+    )
+    dataset_manifest_refs: list[ExperimentDatasetManifestRefPayload] = Field(
+        default_factory=list
+    )
+    dataset_lineage_refs: list[ExperimentDatasetLineageRefPayload] = Field(
         default_factory=list
     )
     code_snapshot_refs: list[ExperimentCodeSnapshotRefPayload] = Field(

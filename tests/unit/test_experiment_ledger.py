@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from agent.core.events import AgentEvent
 from backend import models as backend_models
@@ -288,6 +289,47 @@ def test_payload_round_trips_from_record():
     assert payload["session_id"] == "session-a"
     assert payload["run_id"] == "run-roundtrip"
     assert ExperimentRunRecord.model_validate(payload) == record
+
+
+def test_run_record_accepts_direct_dataset_manifest_and_lineage_refs():
+    record = make_record(
+        run_id="run-with-dataset-refs",
+        dataset_manifest_refs=[{"manifest_id": " manifest-1 "}],
+        dataset_lineage_refs=[
+            {
+                "lineage_id": " lineage-1 ",
+                "node_id": " filter-train ",
+            }
+        ],
+    )
+
+    assert record.dataset_manifest_refs[0].manifest_id == "manifest-1"
+    assert record.dataset_lineage_refs[0].lineage_id == "lineage-1"
+    assert record.dataset_lineage_refs[0].node_id == "filter-train"
+    assert ExperimentRunRecord.model_validate(
+        experiment_run_recorded_payload(record)
+    ) == record
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "dataset_manifest_refs",
+        "dataset_lineage_refs",
+    ],
+)
+def test_run_record_rejects_unknown_direct_dataset_ref_fields(field_name):
+    payload = _valid_record_payload()
+    ref = (
+        {"manifest_id": "manifest-1"}
+        if field_name == "dataset_manifest_refs"
+        else {"lineage_id": "lineage-1"}
+    )
+    ref["unexpected"] = "value"
+    payload[field_name] = [ref]
+
+    with pytest.raises(ValidationError):
+        ExperimentRunRecord.model_validate(payload)
 
 
 def test_snapshot_payloads_round_trip_from_records():
@@ -981,6 +1023,13 @@ def _valid_record_payload(
                 "source": "dataset_registry",
                 "name": "training-set",
                 "digest": "sha256:data",
+            }
+        ],
+        "dataset_manifest_refs": [{"manifest_id": "manifest-1"}],
+        "dataset_lineage_refs": [
+            {
+                "lineage_id": "lineage-1",
+                "node_id": "filter-train",
             }
         ],
         "code_snapshot_refs": [

@@ -479,6 +479,13 @@ def _valid_experiment_run_recorded_payload() -> dict:
                 "digest": "sha256:data",
             }
         ],
+        "dataset_manifest_refs": [{"manifest_id": " manifest-1 "}],
+        "dataset_lineage_refs": [
+            {
+                "lineage_id": " lineage-1 ",
+                "node_id": " filter-train ",
+            }
+        ],
         "code_snapshot_refs": [
             {
                 "snapshot_id": "code-1",
@@ -1989,6 +1996,9 @@ def test_experiment_run_recorded_payload_validates_and_normalizes():
     assert event.data["run_id"] == "run-1"
     assert event.data["status"] == "completed"
     assert event.data["dataset_snapshot_refs"][0]["source"] == "dataset_registry"
+    assert event.data["dataset_manifest_refs"][0]["manifest_id"] == "manifest-1"
+    assert event.data["dataset_lineage_refs"][0]["lineage_id"] == "lineage-1"
+    assert event.data["dataset_lineage_refs"][0]["node_id"] == "filter-train"
     assert event.data["runtime"]["provider"] == "local"
     assert event.data["metrics"][0]["name"] == "accuracy"
 
@@ -2020,12 +2030,34 @@ def test_experiment_run_recorded_rejects_unknown_nested_fields():
 
 
 @pytest.mark.parametrize(
+    "field_name",
+    [
+        "dataset_manifest_refs",
+        "dataset_lineage_refs",
+    ],
+)
+def test_experiment_run_recorded_rejects_unknown_dataset_ref_fields(field_name):
+    payload = _valid_experiment_run_recorded_payload()
+    payload[field_name][0]["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=8,
+            event_type="experiment.run_recorded",
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
     ("path", "value"),
     [
         (("session_id",), ""),
         (("run_id",), ""),
         (("hypothesis",), ""),
         (("dataset_snapshot_refs", 0, "snapshot_id"), ""),
+        (("dataset_manifest_refs", 0, "manifest_id"), ""),
+        (("dataset_lineage_refs", 0, "lineage_id"), ""),
         (("metrics", 0, "name"), ""),
     ],
 )
