@@ -191,7 +191,10 @@ Current behavior:
 
 Current limits:
 
-- There is no durable compute budget ledger or hard spend cap for HF Jobs.
+- Inert budget limit and usage ledger records can now be validated as
+  `AgentEvent` payloads, but no runtime producer emits them yet.
+- There is still no hard spend cap for HF Jobs, and the budget ledger does not
+  enforce, reserve, or consume quota.
 - Running job refs are memory-only until projected into durable session refs.
 - Job storage is ephemeral unless scripts publish artifacts to the Hub.
 

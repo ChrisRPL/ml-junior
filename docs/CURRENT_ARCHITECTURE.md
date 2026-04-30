@@ -258,8 +258,8 @@ Current behavior:
   and UI hydration.
 - Phase events, plan updates, approval events, tool state/output events, active
   job refs, artifact/metric/log refs, evidence items, evidence claim links,
-  human requests, and verifier verdicts project into workflow state when those
-  events exist.
+  decision/proof records, human requests, and verifier verdicts project into
+  workflow state when those events exist.
 - Built-in flow templates live under `backend/builtin_flow_templates/`.
   `GET /api/flows` returns the read-only catalog. `GET
   /api/flows/{template_id}/preview` returns inputs, required inputs, budgets,
@@ -316,7 +316,11 @@ Current agent/backend event types validated or projected in code:
   `verifier.completed`: evidence/verifier metadata for workflow projection.
 - `decision_card.recorded` and `proof_bundle.recorded`: inert decision/proof
   metadata for future audit bundles. They validate explicit caller-supplied
-  records but do not sign, export, or block final answers.
+  records and project into `evidence_summary`, but do not sign, export, or
+  block final answers.
+- `budget.limit_recorded` and `budget.usage_recorded`: inert budget limit and
+  usage ledger metadata. They validate explicit caller-supplied records but do
+  not enforce spend caps, consume quota, or launch/poll jobs.
 - `human_request.requested` and `human_request.resolved`: human-in-the-loop
   workflow metadata.
 - `compacted`: context compaction changed token usage.
