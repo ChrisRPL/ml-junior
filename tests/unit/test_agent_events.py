@@ -8,6 +8,10 @@ from pydantic import ValidationError
 
 from agent.core.events import AgentEvent, EVENT_PAYLOAD_MODELS
 from agent.core.session import Event, Session
+from backend.human_requests import (
+    HUMAN_REQUEST_REQUESTED_EVENT,
+    HUMAN_REQUEST_RESOLVED_EVENT,
+)
 
 
 def make_session(event_queue, test_config, fake_tool_router) -> Session:
@@ -311,6 +315,148 @@ def test_current_event_payloads_are_modeled(event_type, payload):
 
     assert event.event_type in EVENT_PAYLOAD_MODELS
     assert event.data == payload
+
+
+def _valid_human_request_requested_payload() -> dict:
+    return {
+        "session_id": "session-a",
+        "request_id": "hr-1",
+        "source_event_sequence": 12,
+        "status": "requested",
+        "channel": "in_app",
+        "summary": "Need dataset choice",
+        "metadata": {"phase_id": "phase-1"},
+        "privacy_class": "unknown",
+        "redaction_status": "none",
+        "created_at": "2026-01-02T03:04:05+00:00",
+        "updated_at": "2026-01-02T03:04:05+00:00",
+    }
+
+
+def _valid_human_request_resolved_payload() -> dict:
+    return {
+        "session_id": "session-a",
+        "request_id": "hr-1",
+        "source_event_sequence": 13,
+        "status": "answered",
+        "channel": "in_app",
+        "summary": "Need dataset choice",
+        "metadata": {"answer_ref": "message-2"},
+        "privacy_class": "unknown",
+        "redaction_status": "partial",
+        "created_at": "2026-01-02T03:04:05+00:00",
+        "updated_at": "2026-01-02T03:04:06+00:00",
+        "resolved_at": "2026-01-02T03:04:06+00:00",
+        "resolution_summary": "Answered in chat",
+    }
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory"),
+    [
+        (HUMAN_REQUEST_REQUESTED_EVENT, _valid_human_request_requested_payload),
+        (HUMAN_REQUEST_RESOLVED_EVENT, _valid_human_request_resolved_payload),
+    ],
+)
+def test_human_request_payloads_validate(event_type, payload_factory):
+    payload = payload_factory()
+
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=1,
+        event_type=event_type,
+        data=payload,
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data == payload
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "path"),
+    [
+        (
+            HUMAN_REQUEST_REQUESTED_EVENT,
+            _valid_human_request_requested_payload,
+            ("request_id",),
+        ),
+        (
+            HUMAN_REQUEST_REQUESTED_EVENT,
+            _valid_human_request_requested_payload,
+            ("summary",),
+        ),
+        (
+            HUMAN_REQUEST_RESOLVED_EVENT,
+            _valid_human_request_resolved_payload,
+            ("session_id",),
+        ),
+    ],
+)
+def test_human_request_payloads_reject_empty_required_text(
+    event_type,
+    payload_factory,
+    path,
+):
+    payload = payload_factory()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = " "
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=1,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "field", "value"),
+    [
+        (
+            HUMAN_REQUEST_REQUESTED_EVENT,
+            _valid_human_request_requested_payload,
+            "unexpected",
+            True,
+        ),
+        (
+            HUMAN_REQUEST_REQUESTED_EVENT,
+            _valid_human_request_requested_payload,
+            "status",
+            "answered",
+        ),
+        (
+            HUMAN_REQUEST_RESOLVED_EVENT,
+            _valid_human_request_resolved_payload,
+            "status",
+            "requested",
+        ),
+        (
+            HUMAN_REQUEST_RESOLVED_EVENT,
+            _valid_human_request_resolved_payload,
+            "redaction_status",
+            "complete",
+        ),
+    ],
+)
+def test_human_request_payloads_reject_invalid_values(
+    event_type,
+    payload_factory,
+    field,
+    value,
+):
+    payload = payload_factory()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=1,
+            event_type=event_type,
+            data=payload,
+        )
 
 
 def _valid_experiment_run_recorded_payload() -> dict:

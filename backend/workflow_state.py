@@ -12,6 +12,7 @@ from backend.evidence_ledger import (
 )
 from backend.experiment_ledger import project_log_refs, project_metrics
 from backend.flow_verifier_mapping import build_flow_verifier_coverage_report
+from backend.human_requests import project_human_requests
 from backend.job_artifact_refs import project_active_jobs, project_artifact_refs
 from backend.operation_store import OperationRecord
 from backend.session_store import SessionRecord
@@ -125,6 +126,7 @@ def build_workflow_state(
         session_id,
         unique_events,
     )
+    recorded_human_requests = _human_requests_from_events(session_id, unique_events)
     phase_projection: PhaseState | None = None
     phase_started_at: dict[str, str | None] = {}
     phase_blockers: list[dict[str, Any]] = []
@@ -203,7 +205,7 @@ def build_workflow_state(
         pending_approvals=pending_approvals,
         active_jobs=active_job_refs,
         operation_refs=_operation_refs(operations or []),
-        human_requests=[],
+        human_requests=recorded_human_requests,
         budget=_budget_placeholder(),
         evidence_summary=_evidence_summary(
             artifact_refs=recorded_artifact_refs,
@@ -612,6 +614,16 @@ def _verifier_verdicts_from_events(
 
     return [
         record for _, record in sorted(latest.values(), key=lambda value: value[0])
+    ]
+
+
+def _human_requests_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    return [
+        {"source": "event", **record.model_dump(mode="json", exclude_none=True)}
+        for record in project_human_requests(session_id, events)
     ]
 
 

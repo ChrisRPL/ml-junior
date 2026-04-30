@@ -9,6 +9,11 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from agent.core.redaction import REDACTION_NONE, redact_value
+from backend.human_requests import (
+    HUMAN_REQUEST_REQUESTED_EVENT,
+    HUMAN_REQUEST_RESOLVED_EVENT,
+)
+from backend.models import HumanRequestRequestedPayload, HumanRequestResolvedPayload
 
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -523,7 +528,7 @@ class VerifierCompletedPayload(VerifierLedgerPayload):
     created_at: NonEmptyStr | None = None
 
 
-EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
+EVENT_PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "ready": MessagePayload,
     "processing": MessagePayload,
     "assistant_message": AssistantContentPayload,
@@ -554,6 +559,8 @@ EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
     "evidence_item.recorded": EvidenceItemRecordedPayload,
     "evidence_claim_link.recorded": EvidenceClaimLinkRecordedPayload,
     "verifier.completed": VerifierCompletedPayload,
+    HUMAN_REQUEST_REQUESTED_EVENT: HumanRequestRequestedPayload,
+    HUMAN_REQUEST_RESOLVED_EVENT: HumanRequestResolvedPayload,
 }
 
 

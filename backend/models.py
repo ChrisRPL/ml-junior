@@ -166,6 +166,44 @@ class WorkflowState(BaseModel):
     updated_at: str | None = None
 
 
+class HumanRequestModel(BaseModel):
+    """Closed-schema base for inert human request records."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class HumanRequestBase(HumanRequestModel):
+    session_id: NonEmptyStr
+    request_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    channel: NonEmptyStr | None = None
+    summary: NonEmptyStr | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    privacy_class: Literal["public", "private", "sensitive", "unknown"] = "unknown"
+    redaction_status: Literal["none", "partial", "redacted"]
+    created_at: NonEmptyStr | None = None
+    updated_at: NonEmptyStr | None = None
+
+
+class HumanRequestRecord(HumanRequestBase):
+    """Inert human request lifecycle projection from durable events."""
+
+    status: Literal["requested", "answered", "expired", "canceled"]
+    resolved_at: NonEmptyStr | None = None
+    resolution_summary: NonEmptyStr | None = None
+
+
+class HumanRequestRequestedPayload(HumanRequestBase):
+    status: Literal["requested"] = "requested"
+    summary: NonEmptyStr
+
+
+class HumanRequestResolvedPayload(HumanRequestBase):
+    status: Literal["answered", "expired", "canceled"]
+    resolved_at: NonEmptyStr | None = None
+    resolution_summary: NonEmptyStr | None = None
+
+
 class ContinuityModel(BaseModel):
     """Closed-schema base for metadata-only continuity records."""
 

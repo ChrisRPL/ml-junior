@@ -9,11 +9,17 @@ from backend.evidence_ledger import (
 )
 from backend.event_store import SQLiteEventStore
 from backend.experiment_ledger import LOG_REF_RECORDED_EVENT, METRIC_RECORDED_EVENT
+from backend.human_requests import (
+    HUMAN_REQUEST_REQUESTED_EVENT,
+    HUMAN_REQUEST_RESOLVED_EVENT,
+    human_request_requested_payload,
+    human_request_resolved_payload,
+)
 from backend.job_artifact_refs import (
     ACTIVE_JOB_RECORDED_EVENT,
     ARTIFACT_REF_RECORDED_EVENT,
 )
-from backend.models import VerifierVerdictRecord
+from backend.models import HumanRequestRecord, VerifierVerdictRecord
 from backend.operation_store import OPERATION_RUNNING, SQLiteOperationStore
 from backend.session_store import SQLiteSessionStore
 from backend.verifier_ledger import (
@@ -124,6 +130,51 @@ def make_artifact_ref_recorded_event(
             "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
         },
     ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
+def make_human_request_event(
+    *,
+    sequence: int,
+    request_id: str = "hr-1",
+    status: str = "requested",
+    summary: str | None = "Need dataset choice",
+    session_id: str = "session-a",
+) -> AgentEvent:
+    record = HumanRequestRecord(
+        session_id=session_id,
+        request_id=request_id,
+        source_event_sequence=sequence,
+        status=status,
+        channel="in_app",
+        summary=summary,
+        metadata={},
+        privacy_class="unknown",
+        redaction_status="none",
+        created_at="2026-01-02T03:04:01+00:00",
+        updated_at=f"2026-01-02T03:04:{sequence:02d}+00:00",
+        resolved_at=(
+            f"2026-01-02T03:04:{sequence:02d}+00:00"
+            if status != "requested"
+            else None
+        ),
+        resolution_summary="Answered in chat" if status == "answered" else None,
+    )
+    event_type = (
+        HUMAN_REQUEST_REQUESTED_EVENT
+        if status == "requested"
+        else HUMAN_REQUEST_RESOLVED_EVENT
+    )
+    payload = (
+        human_request_requested_payload(record)
+        if status == "requested"
+        else human_request_resolved_payload(record)
+    )
+    return make_event(
+        sequence=sequence,
+        event_type=event_type,
+        session_id=session_id,
+        data=payload,
+    )
 
 
 def make_metric_recorded_event(
@@ -364,6 +415,76 @@ def test_approval_required_projects_pending_approval_refs():
             "tool_call_id": "tc-1",
             "arguments": {"hardware": "cpu-basic"},
         }
+    ]
+
+
+def test_human_request_events_project_into_workflow_state():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_human_request_event(sequence=1),
+            make_human_request_event(
+                sequence=2,
+                status="answered",
+                summary=None,
+            ),
+        ],
+    )
+
+    assert state.human_requests == [
+        {
+            "source": "event",
+            "session_id": "session-a",
+            "request_id": "hr-1",
+            "source_event_sequence": 2,
+            "channel": "in_app",
+            "summary": "Need dataset choice",
+            "metadata": {},
+            "privacy_class": "unknown",
+            "redaction_status": "none",
+            "created_at": "2026-01-02T03:04:01+00:00",
+            "updated_at": "2026-01-02T03:04:02+00:00",
+            "status": "answered",
+            "resolved_at": "2026-01-02T03:04:02+00:00",
+            "resolution_summary": "Answered in chat",
+        }
+    ]
+
+
+def test_human_request_projection_uses_latest_event_per_request():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_human_request_event(sequence=1, request_id="hr-1"),
+            make_human_request_event(
+                sequence=2,
+                request_id="hr-2",
+                summary="Need metric choice",
+            ),
+            make_human_request_event(
+                sequence=3,
+                request_id="hr-1",
+                status="answered",
+            ),
+            make_human_request_event(
+                sequence=4,
+                request_id="hr-1",
+                summary="Need follow-up",
+            ),
+            make_human_request_event(
+                sequence=5,
+                request_id="hr-other",
+                session_id="session-b",
+            ),
+        ],
+    )
+
+    assert [
+        (request["request_id"], request["status"], request["summary"])
+        for request in state.human_requests
+    ] == [
+        ("hr-2", "requested", "Need metric choice"),
+        ("hr-1", "requested", "Need follow-up"),
     ]
 
 
