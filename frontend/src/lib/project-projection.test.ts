@@ -19,6 +19,32 @@ function assert(condition: boolean, message: string): void {
   }
 }
 
+function verifierCatalog(): NonNullable<ProjectSnapshot['evidence_summary']['verifier_catalog']> {
+  return {
+    source: 'flow_verifier_mapping',
+    catalog_check_ids: ['dataset.card.present', 'eval.metric.valid'],
+    direct_catalog_check_ids: ['dataset.card.present'],
+    mapped_catalog_check_ids: ['eval.metric.valid'],
+    flow_local_verifier_ids: ['metric-is-reported'],
+    intentional_unmapped_ids: ['paper-specific-sanity-check'],
+    unknown_ids: ['new-local-check'],
+    mapping_rows: [{
+      flow_verifier_id: 'metric-is-reported',
+      catalog_check_id: 'eval.metric.valid',
+    }],
+    counts: {
+      verdict_count: 3,
+      observed_id_count: 3,
+      catalog_check_id_count: 2,
+      direct_catalog_check_id_count: 1,
+      mapped_catalog_check_id_count: 1,
+      flow_local_verifier_id_count: 2,
+      intentional_unmapped_id_count: 1,
+      unknown_id_count: 1,
+    },
+  };
+}
+
 function testReplayAndDuplicateEvents(): void {
   const planUpdate = event(2, 'plan_update', {
     plan: [{ id: 'p1', content: 'Build adapter', status: 'in_progress' }],
@@ -128,12 +154,92 @@ function testLiveTrackingRefsPassthroughAndPlaceholder(): void {
   assert(snapshot.live_tracking_refs.some((ref) => ref.tool_call_id === 'tc-track' && ref.space_id === 'space-1'), 'Trackio event fields should become inert refs');
 }
 
+function testEvidenceSummaryAbsentVerifierCatalogCompatibility(): void {
+  const snapshot = projectSnapshotFromEvents('session-1', [
+    event(1, 'processing', {
+      evidence_summary: {
+        source: 'event',
+        status: 'available',
+        claim_count: 1,
+        artifact_count: 2,
+        metric_count: 3,
+        items: [],
+      },
+    }),
+  ]);
+
+  assert(snapshot.evidence_summary.claim_count === 1, 'evidence summary should still merge without verifier catalog metadata');
+  assert(snapshot.evidence_summary.verifier_catalog === undefined, 'absent verifier catalog metadata should remain optional');
+}
+
+function testEvidenceSummaryVerifierCatalogPreservation(): void {
+  const catalog = verifierCatalog();
+  const snapshot = projectSnapshotFromEvents('session-1', [
+    event(1, 'processing', {
+      evidence_summary: {
+        source: 'event',
+        status: 'available',
+        claim_count: 1,
+        artifact_count: 1,
+        metric_count: 1,
+        items: [],
+        verifier_catalog: catalog,
+      },
+    }),
+    event(2, 'processing', {
+      evidence_summary: {
+        source: 'event',
+        status: 'available',
+        claim_count: 2,
+        artifact_count: 1,
+        metric_count: 1,
+        items: [],
+      },
+    }),
+  ]);
+
+  assert(snapshot.evidence_summary.claim_count === 2, 'later evidence summary fields should merge');
+  assert(
+    snapshot.evidence_summary.verifier_catalog?.mapped_catalog_check_ids[0] === 'eval.metric.valid',
+    'valid verifier catalog metadata should be preserved during event projection merge',
+  );
+  assert(
+    snapshot.evidence_summary.verifier_catalog?.counts.unknown_id_count === 1,
+    'verifier catalog counts should be preserved during event projection merge',
+  );
+}
+
+function testEvidenceSummaryMalformedVerifierCatalogDoesNotCrash(): void {
+  const snapshot = projectSnapshotFromEvents('session-1', [
+    event(1, 'processing', {
+      evidence_summary: {
+        source: 'event',
+        status: 'available',
+        claim_count: 1,
+        artifact_count: 1,
+        metric_count: 1,
+        items: [],
+        verifier_catalog: {
+          source: 'flow_verifier_mapping',
+          catalog_check_ids: ['dataset.card.present', 42],
+        },
+      },
+    }),
+  ]);
+
+  assert(snapshot.evidence_summary.claim_count === 1, 'malformed optional verifier catalog metadata should not block summary merge');
+  assert(snapshot.evidence_summary.verifier_catalog === undefined, 'malformed optional verifier catalog metadata should be ignored');
+}
+
 const tests = [
   testReplayAndDuplicateEvents,
   testApprovalRestorationFromDurableSnapshot,
   testDeferredToolRestoreAndJobStatusUpdate,
   testStaleSnapshotFallback,
   testLiveTrackingRefsPassthroughAndPlaceholder,
+  testEvidenceSummaryAbsentVerifierCatalogCompatibility,
+  testEvidenceSummaryVerifierCatalogPreservation,
+  testEvidenceSummaryMalformedVerifierCatalogDoesNotCrash,
 ];
 
 for (const test of tests) {

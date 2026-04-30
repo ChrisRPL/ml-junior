@@ -7,6 +7,9 @@ import type {
   ProjectEvidenceSummary,
   ProjectPhaseSnapshot,
   ProjectSnapshot,
+  ProjectVerifierCatalogCounts,
+  ProjectVerifierCatalogMappingRow,
+  ProjectVerifierCatalogSummary,
 } from '../types/project';
 
 export const MAX_PROCESSED_EVENT_IDS = 200;
@@ -145,6 +148,9 @@ export function mergeEvidence(
   updatedAt: string | undefined,
 ): ProjectEvidenceSummary {
   if (!isRecord(value)) return current;
+  const verifierCatalog = Object.prototype.hasOwnProperty.call(value, 'verifier_catalog')
+    ? normalizeVerifierCatalogMetadata(value.verifier_catalog) ?? current.verifier_catalog
+    : current.verifier_catalog;
   return {
     source: readString(value, 'source') ?? 'event',
     status: readString(value, 'status') ?? current.status,
@@ -153,6 +159,56 @@ export function mergeEvidence(
     metric_count: readNumber(value, 'metric_count') ?? current.metric_count,
     items: Array.isArray(value.items) ? value.items : current.items,
     updated_at: updatedAt ?? current.updated_at,
+    ...(verifierCatalog ? { verifier_catalog: verifierCatalog } : {}),
+  };
+}
+
+export function normalizeEvidenceSummary(summary: ProjectEvidenceSummary): ProjectEvidenceSummary {
+  const verifierCatalog = normalizeVerifierCatalogMetadata(
+    (summary as ProjectEvidenceSummary & { verifier_catalog?: unknown }).verifier_catalog,
+  );
+  const normalized = { ...summary };
+  delete (normalized as ProjectEvidenceSummary & { verifier_catalog?: unknown }).verifier_catalog;
+  return verifierCatalog ? { ...normalized, verifier_catalog: verifierCatalog } : normalized;
+}
+
+export function normalizeVerifierCatalogMetadata(value: unknown): ProjectVerifierCatalogSummary | null | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return null;
+
+  const catalogCheckIds = parseStringArray(value.catalog_check_ids);
+  const directCatalogCheckIds = parseStringArray(value.direct_catalog_check_ids);
+  const mappedCatalogCheckIds = parseStringArray(value.mapped_catalog_check_ids);
+  const flowLocalVerifierIds = parseStringArray(value.flow_local_verifier_ids);
+  const intentionalUnmappedIds = parseStringArray(value.intentional_unmapped_ids);
+  const unknownIds = parseStringArray(value.unknown_ids);
+  const mappingRows = parseVerifierCatalogMappingRows(value.mapping_rows);
+  const counts = parseVerifierCatalogCounts(value.counts);
+
+  if (
+    typeof value.source !== 'string'
+    || catalogCheckIds === null
+    || directCatalogCheckIds === null
+    || mappedCatalogCheckIds === null
+    || flowLocalVerifierIds === null
+    || intentionalUnmappedIds === null
+    || unknownIds === null
+    || mappingRows === null
+    || counts === null
+  ) {
+    return null;
+  }
+
+  return {
+    source: value.source,
+    catalog_check_ids: catalogCheckIds,
+    direct_catalog_check_ids: directCatalogCheckIds,
+    mapped_catalog_check_ids: mappedCatalogCheckIds,
+    flow_local_verifier_ids: flowLocalVerifierIds,
+    intentional_unmapped_ids: intentionalUnmappedIds,
+    unknown_ids: unknownIds,
+    mapping_rows: mappingRows,
+    counts,
   };
 }
 
@@ -284,6 +340,57 @@ export function readStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const strings = value.filter((item): item is string => typeof item === 'string');
   return strings.length > 0 ? strings : undefined;
+}
+
+function parseStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) return null;
+  return value;
+}
+
+function parseVerifierCatalogMappingRows(value: unknown): ProjectVerifierCatalogMappingRow[] | null {
+  if (!Array.isArray(value)) return null;
+  const rows = value.map((item) => {
+    if (!isRecord(item) || typeof item.flow_verifier_id !== 'string' || typeof item.catalog_check_id !== 'string') {
+      return null;
+    }
+    return {
+      flow_verifier_id: item.flow_verifier_id,
+      catalog_check_id: item.catalog_check_id,
+    };
+  });
+  if (rows.some((item) => item === null)) return null;
+  return rows as ProjectVerifierCatalogMappingRow[];
+}
+
+function parseVerifierCatalogCounts(value: unknown): ProjectVerifierCatalogCounts | null {
+  if (!isRecord(value)) return null;
+  if (
+    !isNonNegativeInteger(value.verdict_count)
+    || !isNonNegativeInteger(value.observed_id_count)
+    || !isNonNegativeInteger(value.catalog_check_id_count)
+    || !isNonNegativeInteger(value.direct_catalog_check_id_count)
+    || !isNonNegativeInteger(value.mapped_catalog_check_id_count)
+    || !isNonNegativeInteger(value.flow_local_verifier_id_count)
+    || !isNonNegativeInteger(value.intentional_unmapped_id_count)
+    || !isNonNegativeInteger(value.unknown_id_count)
+  ) {
+    return null;
+  }
+
+  return {
+    verdict_count: value.verdict_count,
+    observed_id_count: value.observed_id_count,
+    catalog_check_id_count: value.catalog_check_id_count,
+    direct_catalog_check_id_count: value.direct_catalog_check_id_count,
+    mapped_catalog_check_id_count: value.mapped_catalog_check_id_count,
+    flow_local_verifier_id_count: value.flow_local_verifier_id_count,
+    intentional_unmapped_id_count: value.intentional_unmapped_id_count,
+    unknown_id_count: value.unknown_id_count,
+  };
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 export function readRecord(value: unknown): Record<string, unknown> {

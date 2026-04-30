@@ -34,6 +34,32 @@ function snapshot(sequence: number, overrides: Partial<ProjectSnapshot> = {}): P
   };
 }
 
+function verifierCatalog(): NonNullable<ProjectSnapshot['evidence_summary']['verifier_catalog']> {
+  return {
+    source: 'flow_verifier_mapping',
+    catalog_check_ids: ['dataset.card.present', 'eval.metric.valid'],
+    direct_catalog_check_ids: ['dataset.card.present'],
+    mapped_catalog_check_ids: ['eval.metric.valid'],
+    flow_local_verifier_ids: ['metric-is-reported'],
+    intentional_unmapped_ids: ['paper-specific-sanity-check'],
+    unknown_ids: [],
+    mapping_rows: [{
+      flow_verifier_id: 'metric-is-reported',
+      catalog_check_id: 'eval.metric.valid',
+    }],
+    counts: {
+      verdict_count: 2,
+      observed_id_count: 2,
+      catalog_check_id_count: 2,
+      direct_catalog_check_id_count: 1,
+      mapped_catalog_check_id_count: 1,
+      flow_local_verifier_id_count: 1,
+      intentional_unmapped_id_count: 1,
+      unknown_id_count: 0,
+    },
+  };
+}
+
 async function testSuccessfulHydration(): Promise<void> {
   let path = '';
   const durable = snapshot(7);
@@ -49,6 +75,63 @@ async function testSuccessfulHydration(): Promise<void> {
   assert(
     result.ok && result.snapshot.compatibility.durable_snapshot_version === 1,
     'hydrated snapshot should mark durable version',
+  );
+  assert(
+    result.ok && result.snapshot.evidence_summary.verifier_catalog === undefined,
+    'absent verifier catalog metadata should stay compatible',
+  );
+}
+
+async function testHydrationPreservesVerifierCatalogMetadata(): Promise<void> {
+  const catalog = verifierCatalog();
+  const durable = snapshot(8, {
+    evidence_summary: {
+      source: 'event',
+      status: 'available',
+      claim_count: 1,
+      artifact_count: 1,
+      metric_count: 1,
+      items: [],
+      verifier_catalog: catalog,
+    },
+  });
+  const fetcher: ProjectSnapshotFetch = async () => response(200, durable);
+
+  const result = await fetchProjectSnapshot('session-1', fetcher);
+  assert(result.ok, 'valid verifier catalog metadata should hydrate');
+  assert(
+    result.ok && result.snapshot.evidence_summary.verifier_catalog?.catalog_check_ids[1] === 'eval.metric.valid',
+    'hydration should preserve catalog check ids',
+  );
+  assert(
+    result.ok && result.snapshot.evidence_summary.verifier_catalog?.mapping_rows[0]?.flow_verifier_id === 'metric-is-reported',
+    'hydration should preserve mapping rows',
+  );
+  assert(
+    result.ok && result.snapshot.evidence_summary.verifier_catalog?.counts.verdict_count === 2,
+    'hydration should preserve verifier catalog counts',
+  );
+}
+
+async function testHydrationIgnoresMalformedVerifierCatalogMetadata(): Promise<void> {
+  const durable = snapshot(9, {
+    evidence_summary: {
+      ...createEmptyProjectSnapshot('session-1').evidence_summary,
+      source: 'event',
+      status: 'available',
+      verifier_catalog: {
+        source: 'flow_verifier_mapping',
+        catalog_check_ids: ['dataset.card.present', 42],
+      } as NonNullable<ProjectSnapshot['evidence_summary']['verifier_catalog']>,
+    },
+  });
+  const fetcher: ProjectSnapshotFetch = async () => response(200, durable);
+
+  const result = await fetchProjectSnapshot('session-1', fetcher);
+  assert(result.ok, 'malformed optional verifier catalog metadata should not reject snapshot');
+  assert(
+    result.ok && result.snapshot.evidence_summary.verifier_catalog === undefined,
+    'malformed optional verifier catalog metadata should be ignored',
   );
 }
 
@@ -104,11 +187,13 @@ function testOlderHydrationDoesNotOverwriteNewerEvents(): void {
 
 async function run(): Promise<void> {
   await testSuccessfulHydration();
+  await testHydrationPreservesVerifierCatalogMetadata();
+  await testHydrationIgnoresMalformedVerifierCatalogMetadata();
   await testFailedResponseFallback();
   await testMalformedPayloadFallback();
   testOlderHydrationDoesNotOverwriteNewerEvents();
 }
 
 run().then(() => {
-  console.log('project-snapshot-api: 4 tests passed');
+  console.log('project-snapshot-api: 6 tests passed');
 });

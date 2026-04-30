@@ -128,6 +128,34 @@ export interface ProjectBudgetSnapshot {
   updated_at?: string | null;
 }
 
+export interface ProjectVerifierCatalogMappingRow {
+  flow_verifier_id: string;
+  catalog_check_id: string;
+}
+
+export interface ProjectVerifierCatalogCounts {
+  verdict_count: number;
+  observed_id_count: number;
+  catalog_check_id_count: number;
+  direct_catalog_check_id_count: number;
+  mapped_catalog_check_id_count: number;
+  flow_local_verifier_id_count: number;
+  intentional_unmapped_id_count: number;
+  unknown_id_count: number;
+}
+
+export interface ProjectVerifierCatalogSummary {
+  source: 'flow_verifier_mapping' | (string & {});
+  catalog_check_ids: string[];
+  direct_catalog_check_ids: string[];
+  mapped_catalog_check_ids: string[];
+  flow_local_verifier_ids: string[];
+  intentional_unmapped_ids: string[];
+  unknown_ids: string[];
+  mapping_rows: ProjectVerifierCatalogMappingRow[];
+  counts: ProjectVerifierCatalogCounts;
+}
+
 export interface ProjectEvidenceSummary {
   source: 'placeholder' | 'event' | 'durable' | (string & {});
   status: 'placeholder' | 'active' | 'verified' | 'failed' | (string & {});
@@ -136,6 +164,7 @@ export interface ProjectEvidenceSummary {
   metric_count: number;
   items: unknown[];
   updated_at?: string | null;
+  verifier_catalog?: ProjectVerifierCatalogSummary;
 }
 
 export interface LiveTrackingRef {

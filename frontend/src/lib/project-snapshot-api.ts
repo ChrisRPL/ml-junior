@@ -1,5 +1,5 @@
 import { createEmptyProjectSnapshot } from './project-projection';
-import { addWarning, isRecord } from './project-projection-utils';
+import { addWarning, isRecord, normalizeEvidenceSummary } from './project-projection-utils';
 import { PROJECT_SNAPSHOT_VERSION, type ProjectSnapshot } from '../types/project';
 
 export type ProjectSnapshotFetch = (path: string, options?: RequestInit) => Promise<Response>;
@@ -86,6 +86,7 @@ export function chooseHydratedProjectSnapshot(
 function normalizeHydratedSnapshot(snapshot: ProjectSnapshot): ProjectSnapshot {
   return {
     ...snapshot,
+    evidence_summary: normalizeEvidenceSummary(snapshot.evidence_summary),
     compatibility: {
       warnings: [],
       processed_event_ids: [],
