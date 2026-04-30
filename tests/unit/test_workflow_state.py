@@ -3,6 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from agent.core.events import AgentEvent
+from backend.decision_proof_ledger import (
+    DECISION_CARD_RECORDED_EVENT,
+    PROOF_BUNDLE_RECORDED_EVENT,
+)
 from backend.evidence_ledger import (
     EVIDENCE_CLAIM_LINK_RECORDED_EVENT,
     EVIDENCE_ITEM_RECORDED_EVENT,
@@ -346,9 +350,97 @@ def make_verifier_completed_event(
     ).model_copy(update={"id": event_id or f"event-{sequence}"})
 
 
+def make_decision_card_recorded_event(
+    *,
+    sequence: int,
+    decision_id: str = "decision-1",
+    title: str = "Metric choice",
+    proof_bundle_ids: list[str] | None = None,
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    return make_event(
+        sequence=sequence,
+        event_type=DECISION_CARD_RECORDED_EVENT,
+        session_id=session_id,
+        data={
+            "session_id": session_id,
+            "decision_id": decision_id,
+            "source_event_sequence": source_event_sequence or sequence,
+            "title": title,
+            "decision": "Use macro F1 as the primary metric.",
+            "status": "accepted",
+            "rationale": "Macro F1 reflects minority-class performance.",
+            "phase_id": "phase-eval",
+            "run_id": "run-1",
+            "actor": "human-review",
+            "alternatives": [
+                {
+                    "alternative_id": "alternative-accuracy",
+                    "title": "Accuracy",
+                    "summary": "Rejected because classes are imbalanced.",
+                    "outcome": "rejected",
+                }
+            ],
+            "evidence_ids": ["evidence-1"],
+            "claim_ids": ["claim-1"],
+            "artifact_ids": ["artifact-1"],
+            "proof_bundle_ids": (
+                ["proof-1"] if proof_bundle_ids is None else proof_bundle_ids
+            ),
+            "metadata": {"reviewed_by": "synthetic-fixture"},
+            "privacy_class": "private",
+            "redaction_status": "none",
+            "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        },
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
+def make_proof_bundle_recorded_event(
+    *,
+    sequence: int,
+    proof_bundle_id: str = "proof-1",
+    title: str = "Metric choice proof",
+    decision_ids: list[str] | None = None,
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    return make_event(
+        sequence=sequence,
+        event_type=PROOF_BUNDLE_RECORDED_EVENT,
+        session_id=session_id,
+        data={
+            "session_id": session_id,
+            "proof_bundle_id": proof_bundle_id,
+            "source_event_sequence": source_event_sequence or sequence,
+            "title": title,
+            "summary": "Evidence and verifier refs supporting the metric choice.",
+            "status": "complete",
+            "scope": "metric-selection",
+            "phase_id": "phase-eval",
+            "run_id": "run-1",
+            "decision_ids": ["decision-1"] if decision_ids is None else decision_ids,
+            "evidence_ids": ["evidence-1"],
+            "claim_ids": ["claim-1"],
+            "artifact_ids": ["artifact-1"],
+            "verifier_verdict_ids": ["verdict-1"],
+            "metadata": {"reviewed_by": "synthetic-fixture"},
+            "privacy_class": "private",
+            "redaction_status": "none",
+            "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        },
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
 def _summary_item_id(item: dict) -> str | None:
     if "verdict_id" in item:
         return item.get("verdict_id")
+    if "decision_id" in item:
+        return item.get("decision_id")
+    if "proof_bundle_id" in item:
+        return item.get("proof_bundle_id")
     if "link_id" in item:
         return item.get("link_id")
     if "evidence_id" in item and "kind" in item:
@@ -597,6 +689,24 @@ def test_terminal_active_job_recorded_does_not_show_in_active_jobs():
     assert state.status == "idle"
 
 
+def test_empty_workflow_state_preserves_evidence_summary_placeholder():
+    state = build_workflow_state(session_id="session-a", events=[])
+
+    assert state.evidence_summary == {
+        "source": "placeholder",
+        "status": "placeholder",
+        "claim_count": 0,
+        "claim_link_count": 0,
+        "evidence_count": 0,
+        "artifact_count": 0,
+        "metric_count": 0,
+        "log_count": 0,
+        "items": [],
+    }
+    assert "decision_card_count" not in state.evidence_summary
+    assert "proof_bundle_count" not in state.evidence_summary
+
+
 def test_artifact_ref_recorded_projects_explicit_refs_into_evidence_summary():
     state = build_workflow_state(
         session_id="session-a",
@@ -699,6 +809,54 @@ def test_evidence_item_and_claim_link_recorded_project_into_evidence_summary():
     ] == ["evidence-accuracy", "evidence-link-accuracy"]
     assert state.evidence_summary["items"][0]["title"] == "Accuracy threshold evidence"
     assert state.evidence_summary["items"][1]["link_id"] == "evidence-link-accuracy"
+
+
+def test_decision_card_and_proof_bundle_project_into_evidence_summary():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_decision_card_recorded_event(
+                sequence=1,
+                decision_id="decision-metric",
+                title="Choose evaluation metric",
+                proof_bundle_ids=["proof-metric"],
+            ),
+            make_proof_bundle_recorded_event(
+                sequence=2,
+                proof_bundle_id="proof-metric",
+                title="Evaluation metric proof",
+                decision_ids=["decision-metric"],
+            ),
+            make_decision_card_recorded_event(
+                sequence=3,
+                decision_id="decision-other",
+                session_id="session-b",
+            ),
+            make_proof_bundle_recorded_event(
+                sequence=4,
+                proof_bundle_id="proof-other",
+                session_id="session-b",
+            ),
+        ],
+    )
+
+    assert state.evidence_summary["source"] == "event"
+    assert state.evidence_summary["status"] == "available"
+    assert state.evidence_summary["decision_card_count"] == 1
+    assert state.evidence_summary["proof_bundle_count"] == 1
+    assert state.evidence_summary["evidence_count"] == 0
+    assert state.evidence_summary["claim_count"] == 0
+    assert state.evidence_summary["artifact_count"] == 0
+    assert state.evidence_summary["metric_count"] == 0
+    assert state.evidence_summary["log_count"] == 0
+    assert [
+        _summary_item_id(item)
+        for item in state.evidence_summary["items"]
+    ] == ["decision-metric", "proof-metric"]
+    assert state.evidence_summary["items"][0]["title"] == "Choose evaluation metric"
+    assert state.evidence_summary["items"][0]["proof_bundle_ids"] == ["proof-metric"]
+    assert state.evidence_summary["items"][1]["title"] == "Evaluation metric proof"
+    assert state.evidence_summary["items"][1]["decision_ids"] == ["decision-metric"]
 
 
 def test_verifier_completed_projects_into_evidence_summary():

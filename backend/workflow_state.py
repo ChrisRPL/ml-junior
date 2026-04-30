@@ -4,6 +4,10 @@ from datetime import datetime
 from typing import Any
 
 from agent.core.events import AgentEvent
+from backend.decision_proof_ledger import (
+    project_decision_cards,
+    project_proof_bundles,
+)
 from backend.evidence_ledger import (
     EVIDENCE_CLAIM_LINK_RECORDED_EVENT,
     EVIDENCE_ITEM_RECORDED_EVENT,
@@ -122,6 +126,8 @@ def build_workflow_state(
     recorded_log_refs = _log_refs_from_events(session_id, unique_events)
     recorded_evidence_items = _evidence_items_from_events(session_id, unique_events)
     recorded_claim_links = _evidence_claim_links_from_events(session_id, unique_events)
+    recorded_decision_cards = _decision_cards_from_events(session_id, unique_events)
+    recorded_proof_bundles = _proof_bundles_from_events(session_id, unique_events)
     recorded_verifier_verdicts = _verifier_verdicts_from_events(
         session_id,
         unique_events,
@@ -213,6 +219,8 @@ def build_workflow_state(
             log_refs=recorded_log_refs,
             evidence_items=recorded_evidence_items,
             claim_links=recorded_claim_links,
+            decision_cards=recorded_decision_cards,
+            proof_bundles=recorded_proof_bundles,
             verifier_verdicts=recorded_verifier_verdicts,
         ),
         live_tracking_refs=[_live_tracking_placeholder(session_id)],
@@ -596,6 +604,26 @@ def _evidence_claim_links_from_events(
     ]
 
 
+def _decision_cards_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    return [
+        record.model_dump(mode="json", exclude_none=True)
+        for record in project_decision_cards(session_id, events)
+    ]
+
+
+def _proof_bundles_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    return [
+        record.model_dump(mode="json", exclude_none=True)
+        for record in project_proof_bundles(session_id, events)
+    ]
+
+
 def _verifier_verdicts_from_events(
     session_id: str,
     events: list[AgentEvent],
@@ -660,9 +688,18 @@ def _evidence_summary(
     log_refs: list[dict[str, Any]],
     evidence_items: list[dict[str, Any]],
     claim_links: list[dict[str, Any]],
+    decision_cards: list[dict[str, Any]],
+    proof_bundles: list[dict[str, Any]],
     verifier_verdicts: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    if not artifact_refs and not metric_refs and not log_refs and not evidence_items:
+    if (
+        not artifact_refs
+        and not metric_refs
+        and not log_refs
+        and not evidence_items
+        and not decision_cards
+        and not proof_bundles
+    ):
         if not claim_links and not verifier_verdicts:
             return _evidence_summary_placeholder()
 
@@ -673,6 +710,8 @@ def _evidence_summary(
             *log_refs,
             *evidence_items,
             *claim_links,
+            *decision_cards,
+            *proof_bundles,
             *verifier_verdicts,
         ],
         key=_evidence_item_sort_key,
@@ -689,6 +728,8 @@ def _evidence_summary(
         "artifact_count": len(artifact_refs),
         "metric_count": len(metric_refs),
         "log_count": len(log_refs),
+        "decision_card_count": len(decision_cards),
+        "proof_bundle_count": len(proof_bundles),
         "items": items,
     }
     if verifier_verdicts:
