@@ -128,6 +128,82 @@ def test_payloads_round_trip_from_records():
     assert ArtifactRefRecord.model_validate(artifact_ref_payload) == artifact_ref
 
 
+@pytest.mark.parametrize(
+    ("source", "ref_uri", "locator"),
+    [
+        (
+            "local_path",
+            "file:///tmp/model.pt",
+            {"type": "local_path", "path": "/tmp/model.pt"},
+        ),
+        (
+            "sandbox",
+            "sandbox://sbx-1/artifacts/model.pt",
+            {
+                "type": "sandbox",
+                "sandbox_id": "sbx-1",
+                "path": "/artifacts/model.pt",
+            },
+        ),
+        (
+            "hf_hub",
+            "hf://model/org/model/resolve/main/model.safetensors",
+            {
+                "type": "hf_hub",
+                "repo_id": "org/model",
+                "repo_type": "model",
+                "revision": "main",
+                "path": "model.safetensors",
+            },
+        ),
+        (
+            "remote_uri",
+            "https://artifacts.example/model.pt",
+            {"type": "remote_uri", "uri": "https://artifacts.example/model.pt"},
+        ),
+        (
+            "event_ref",
+            "event://event-artifact/4",
+            {"type": "event_ref", "event_id": "event-artifact", "sequence": 4},
+        ),
+    ],
+)
+def test_artifact_ref_schema_metadata_round_trips_for_locator_sources(
+    source,
+    ref_uri,
+    locator,
+):
+    record = make_artifact_ref(
+        artifact_id=f"artifact-{source}",
+        source=source,
+        ref_uri=ref_uri,
+        locator=locator,
+        lifecycle="available",
+        mime_type="application/octet-stream",
+        size_bytes=1024,
+        producer={
+            "kind": "job",
+            "job_id": "active-job-1",
+            "tool_call_id": "tc-1",
+        },
+        export_policy={
+            "mode": "metadata_only",
+            "destinations": ["experiment_ledger"],
+        },
+    )
+
+    payload = artifact_ref_recorded_payload(record)
+    event = make_artifact_ref_event(record)
+
+    assert ArtifactRefRecord.model_validate(payload) == record
+    assert artifact_ref_record_from_event(event) == record
+    assert event.data["ref_uri"] == ref_uri
+    assert event.data["locator"]["type"] == locator["type"]
+    assert event.data["lifecycle"] == "available"
+    assert event.data["mime_type"] == "application/octet-stream"
+    assert event.data["size_bytes"] == 1024
+
+
 def test_event_to_record_validation_rejects_wrong_type_and_session_mismatch():
     active_job = make_active_job(job_id="active-job-validate")
     artifact_ref = make_artifact_ref(artifact_id="artifact-validate")
@@ -260,6 +336,13 @@ def test_sqlite_store_appends_lists_redacts_and_rejects_duplicate_rows(tmp_path)
         source_event_sequence=20,
         path="/Users/alice/project/model.pt",
         uri=f"https://example.test/artifacts/1?token={secret}",
+        ref_uri=f"https://example.test/refs/1?token={secret}",
+        locator={
+            "type": "remote_uri",
+            "uri": f"https://example.test/locators/1?token={secret}",
+        },
+        producer={"token": secret},
+        export_policy={"Authorization": f"Bearer {secret}"},
         metadata={"api_key": secret},
         redaction_status="none",
     )
@@ -282,6 +365,17 @@ def test_sqlite_store_appends_lists_redacts_and_rejects_duplicate_rows(tmp_path)
     assert created_artifact.metadata["api_key"] == "[REDACTED]"
     assert created_artifact.path == "/Users/[USER]/project/model.pt"
     assert created_artifact.uri == "https://example.test/artifacts/1?token=[REDACTED]"
+    assert (
+        created_artifact.ref_uri
+        == "https://example.test/refs/1?token=[REDACTED]"
+    )
+    assert created_artifact.locator is not None
+    assert (
+        created_artifact.locator.uri
+        == "https://example.test/locators/1?token=[REDACTED]"
+    )
+    assert created_artifact.producer == {"token": "[REDACTED]"}
+    assert created_artifact.export_policy == {"Authorization": "[REDACTED]"}
     assert secret not in str(created_artifact.model_dump())
 
     assert [

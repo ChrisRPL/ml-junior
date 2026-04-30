@@ -620,6 +620,17 @@ def _valid_artifact_ref_recorded_payload() -> dict:
         "source_event_sequence": 9,
         "type": " model_checkpoint ",
         "source": "job",
+        "ref_uri": " file:///tmp/model.pt ",
+        "locator": {
+            "type": "local_path",
+            "path": " /tmp/model.pt ",
+            "uri": " file:///tmp/model.pt ",
+        },
+        "lifecycle": "available",
+        "mime_type": " application/octet-stream ",
+        "size_bytes": 4096,
+        "producer": {"kind": "job", "job_id": "active-job-1"},
+        "export_policy": {"mode": "metadata_only"},
         "source_tool_call_id": " tc-1 ",
         "source_job_id": " active-job-1 ",
         "path": " /tmp/model.pt ",
@@ -1060,8 +1071,134 @@ def test_artifact_ref_recorded_payload_validates_and_normalizes():
     assert event.data["type"] == "model_checkpoint"
     assert event.data["source_tool_call_id"] == "tc-1"
     assert event.data["source_job_id"] == "active-job-1"
+    assert event.data["ref_uri"] == "file:///tmp/model.pt"
+    assert event.data["locator"] == {
+        "type": "local_path",
+        "path": "/tmp/model.pt",
+        "uri": "file:///tmp/model.pt",
+    }
+    assert event.data["lifecycle"] == "available"
+    assert event.data["mime_type"] == "application/octet-stream"
+    assert event.data["size_bytes"] == 4096
     assert event.data["path"] == "/tmp/model.pt"
     assert event.data["label"] == "Best checkpoint"
+
+
+@pytest.mark.parametrize(
+    ("source", "ref_uri", "locator"),
+    [
+        (
+            "local_path",
+            "file:///tmp/model.pt",
+            {"type": "local_path", "path": "/tmp/model.pt"},
+        ),
+        (
+            "sandbox",
+            "sandbox://sbx-1/artifacts/model.pt",
+            {
+                "type": "sandbox",
+                "sandbox_id": "sbx-1",
+                "path": "/artifacts/model.pt",
+            },
+        ),
+        (
+            "hf_hub",
+            "hf://model/org/model/resolve/main/model.safetensors",
+            {
+                "type": "hf_hub",
+                "repo_id": "org/model",
+                "repo_type": "model",
+                "revision": "main",
+                "path": "model.safetensors",
+            },
+        ),
+        (
+            "remote_uri",
+            "https://artifacts.example/model.pt",
+            {"type": "remote_uri", "uri": "https://artifacts.example/model.pt"},
+        ),
+        (
+            "event_ref",
+            "event://event-artifact/4",
+            {"type": "event_ref", "event_id": "event-artifact", "sequence": 4},
+        ),
+    ],
+)
+def test_artifact_ref_recorded_payload_accepts_locator_sources(
+    source,
+    ref_uri,
+    locator,
+):
+    payload = _valid_artifact_ref_recorded_payload()
+    payload.update(
+        {
+            "source": source,
+            "ref_uri": ref_uri,
+            "locator": locator,
+        }
+    )
+
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=13,
+        event_type="artifact_ref.recorded",
+        data=payload,
+    )
+
+    assert event.data["source"] == source
+    assert event.data["ref_uri"] == ref_uri
+    assert event.data["locator"]["type"] == locator["type"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update({"source": "object_store"}),
+        lambda payload: payload.update({"lifecycle": "uploaded"}),
+        lambda payload: payload.update({"size_bytes": -1}),
+        lambda payload: payload.update({"locator": {"type": "remote_uri"}}),
+        lambda payload: payload["locator"].update({"extra": True}),
+    ],
+)
+def test_artifact_ref_recorded_payload_rejects_invalid_schema_metadata(mutation):
+    payload = _valid_artifact_ref_recorded_payload()
+    mutation(payload)
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=13,
+            event_type="artifact_ref.recorded",
+            data=payload,
+        )
+
+
+def test_artifact_ref_recorded_payload_redacts_schema_metadata_in_event_copy():
+    secret = "hf_eventartifactsecret123456789"
+    payload = _valid_artifact_ref_recorded_payload()
+    payload.update(
+        {
+            "ref_uri": f"https://artifacts.example/ref?token={secret}",
+            "locator": {
+                "type": "remote_uri",
+                "uri": f"https://artifacts.example/blob?token={secret}",
+            },
+            "producer": {"api_key": secret},
+            "export_policy": {"Authorization": f"Bearer {secret}"},
+        }
+    )
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=13,
+        event_type="artifact_ref.recorded",
+        data=payload,
+    )
+
+    redacted = event.redacted_copy()
+
+    assert redacted.redaction_status in {"partial", "redacted"}
+    assert secret not in str(redacted.data)
+    assert redacted.data["redaction_status"] == redacted.redaction_status
 
 
 def test_metric_recorded_payload_validates_and_normalizes():

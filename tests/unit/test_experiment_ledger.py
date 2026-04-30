@@ -311,6 +311,25 @@ def test_run_record_accepts_direct_dataset_manifest_and_lineage_refs():
     ) == record
 
 
+def test_run_record_accepts_sandbox_nested_artifact_ref():
+    record = make_record(
+        run_id="run-with-sandbox-artifact",
+        artifact_refs=[
+            {
+                "artifact_id": "artifact-sandbox",
+                "type": "metrics_archive",
+                "source": "sandbox",
+                "uri": "sandbox://sbx-1/artifacts/metrics.json",
+            }
+        ],
+    )
+
+    assert record.artifact_refs[0].source == "sandbox"
+    assert ExperimentRunRecord.model_validate(
+        experiment_run_recorded_payload(record)
+    ) == record
+
+
 @pytest.mark.parametrize(
     "field_name",
     [
@@ -366,6 +385,34 @@ def test_standalone_payloads_round_trip_from_records():
     assert artifact_payload["session_id"] == "session-a"
     assert artifact_payload["artifact_id"] == "artifact-roundtrip"
     assert ArtifactRefRecord.model_validate(artifact_payload) == artifact_ref
+
+
+def test_artifact_ref_schema_metadata_round_trips_through_event_projection():
+    artifact_ref = make_artifact_ref(
+        artifact_id="artifact-schema",
+        source="hf_hub",
+        ref_uri="hf://model/org/model/resolve/main/model.safetensors",
+        locator={
+            "type": "hf_hub",
+            "repo_id": "org/model",
+            "repo_type": "model",
+            "revision": "main",
+            "path": "model.safetensors",
+        },
+        lifecycle="available",
+        mime_type="application/octet-stream",
+        size_bytes=2048,
+        producer={"kind": "job", "job_id": "job-1"},
+        export_policy={"mode": "metadata_only"},
+    )
+    event = make_artifact_ref_event(artifact_ref)
+
+    assert ArtifactRefRecord.model_validate(
+        artifact_ref_recorded_payload(artifact_ref)
+    ) == artifact_ref
+    assert artifact_ref_record_from_event(event) == artifact_ref
+    assert project_artifact_refs("session-a", [event]) == [artifact_ref]
+    assert event.data["locator"]["repo_id"] == "org/model"
 
 
 def test_event_to_record_validation_rejects_wrong_type_and_session_mismatch():
@@ -804,6 +851,13 @@ def test_persisted_json_redacts_standalone_record_secrets(tmp_path):
     )
     artifact_ref = make_artifact_ref(
         artifact_id="artifact-secret",
+        ref_uri=f"https://artifacts.example/ref?token={artifact_secret}",
+        locator={
+            "type": "remote_uri",
+            "uri": f"https://artifacts.example/blob?token={artifact_secret}",
+        },
+        producer={"api_key": artifact_secret},
+        export_policy={"Authorization": f"Bearer {artifact_secret}"},
         metadata={"api_key": artifact_secret},
     )
 
@@ -814,6 +868,17 @@ def test_persisted_json_redacts_standalone_record_secrets(tmp_path):
     assert metric_secret not in str(created_metric.model_dump())
     assert log_secret not in str(created_log.model_dump())
     assert artifact_secret not in str(created_artifact.model_dump())
+    assert (
+        created_artifact.ref_uri
+        == "https://artifacts.example/ref?token=[REDACTED]"
+    )
+    assert created_artifact.locator is not None
+    assert (
+        created_artifact.locator.uri
+        == "https://artifacts.example/blob?token=[REDACTED]"
+    )
+    assert created_artifact.producer == {"api_key": "[REDACTED]"}
+    assert created_artifact.export_policy == {"Authorization": "[REDACTED]"}
 
     connection = sqlite3.connect(database_path)
     try:

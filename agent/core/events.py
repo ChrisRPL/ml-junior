@@ -323,6 +323,49 @@ class ExperimentLogRefPayload(ExperimentLedgerPayload):
     label: NonEmptyStr | None = None
 
 
+class ArtifactLocalPathLocatorPayload(ExperimentLedgerPayload):
+    type: Literal["local_path"]
+    path: NonEmptyStr
+    uri: NonEmptyStr | None = None
+
+
+class ArtifactSandboxLocatorPayload(ExperimentLedgerPayload):
+    type: Literal["sandbox"]
+    sandbox_id: NonEmptyStr | None = None
+    path: NonEmptyStr | None = None
+    uri: NonEmptyStr | None = None
+
+
+class ArtifactHFHubLocatorPayload(ExperimentLedgerPayload):
+    type: Literal["hf_hub"]
+    repo_id: NonEmptyStr
+    repo_type: Literal["model", "dataset", "space", "unknown"] | None = None
+    revision: NonEmptyStr | None = None
+    path: NonEmptyStr | None = None
+    uri: NonEmptyStr | None = None
+
+
+class ArtifactRemoteUriLocatorPayload(ExperimentLedgerPayload):
+    type: Literal["remote_uri"]
+    uri: NonEmptyStr
+
+
+class ArtifactEventRefLocatorPayload(ExperimentLedgerPayload):
+    type: Literal["event_ref"]
+    event_id: NonEmptyStr
+    sequence: int | None = Field(default=None, ge=1)
+
+
+ArtifactLocatorPayload = Annotated[
+    ArtifactLocalPathLocatorPayload
+    | ArtifactSandboxLocatorPayload
+    | ArtifactHFHubLocatorPayload
+    | ArtifactRemoteUriLocatorPayload
+    | ArtifactEventRefLocatorPayload,
+    Field(discriminator="type"),
+]
+
+
 class MetricRecordedPayload(ExperimentMetricRecordPayload):
     session_id: NonEmptyStr
     metric_id: NonEmptyStr
@@ -337,7 +380,7 @@ class LogRefRecordedPayload(ExperimentLogRefPayload):
 class ExperimentArtifactRefPayload(ExperimentLedgerPayload):
     artifact_id: NonEmptyStr
     type: NonEmptyStr
-    source: Literal["local_path", "remote_uri", "hf_hub", "event_ref"]
+    source: Literal["local_path", "sandbox", "remote_uri", "hf_hub", "event_ref"]
     uri: NonEmptyStr | None = None
     digest: NonEmptyStr | None = None
 
@@ -438,11 +481,27 @@ class ArtifactRefRecordedPayload(ExperimentLedgerPayload):
         "tool",
         "job",
         "local_path",
+        "sandbox",
         "remote_uri",
         "hf_hub",
         "event_ref",
         "manual",
     ]
+    ref_uri: NonEmptyStr | None = None
+    locator: ArtifactLocatorPayload | None = None
+    lifecycle: Literal[
+        "planned",
+        "recorded",
+        "available",
+        "consumed",
+        "archived",
+        "deleted",
+        "unknown",
+    ] | None = None
+    mime_type: NonEmptyStr | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    producer: dict[str, Any] | None = None
+    export_policy: dict[str, Any] | None = None
     source_tool_call_id: NonEmptyStr | None = None
     source_job_id: NonEmptyStr | None = None
     path: NonEmptyStr | None = None

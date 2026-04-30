@@ -406,6 +406,49 @@ class ExperimentLogRef(ExperimentLedgerModel):
     label: NonEmptyStr | None = None
 
 
+class ArtifactLocalPathLocator(ExperimentLedgerModel):
+    type: Literal["local_path"]
+    path: NonEmptyStr
+    uri: NonEmptyStr | None = None
+
+
+class ArtifactSandboxLocator(ExperimentLedgerModel):
+    type: Literal["sandbox"]
+    sandbox_id: NonEmptyStr | None = None
+    path: NonEmptyStr | None = None
+    uri: NonEmptyStr | None = None
+
+
+class ArtifactHFHubLocator(ExperimentLedgerModel):
+    type: Literal["hf_hub"]
+    repo_id: NonEmptyStr
+    repo_type: Literal["model", "dataset", "space", "unknown"] | None = None
+    revision: NonEmptyStr | None = None
+    path: NonEmptyStr | None = None
+    uri: NonEmptyStr | None = None
+
+
+class ArtifactRemoteUriLocator(ExperimentLedgerModel):
+    type: Literal["remote_uri"]
+    uri: NonEmptyStr
+
+
+class ArtifactEventRefLocator(ExperimentLedgerModel):
+    type: Literal["event_ref"]
+    event_id: NonEmptyStr
+    sequence: int | None = Field(default=None, ge=1)
+
+
+ArtifactLocator = Annotated[
+    ArtifactLocalPathLocator
+    | ArtifactSandboxLocator
+    | ArtifactHFHubLocator
+    | ArtifactRemoteUriLocator
+    | ArtifactEventRefLocator,
+    Field(discriminator="type"),
+]
+
+
 class MetricRecord(ExperimentMetricRecord):
     """Standalone inert metric record for append-only experiment ledger storage."""
 
@@ -424,7 +467,7 @@ class LogRefRecord(ExperimentLogRef):
 class ExperimentArtifactRef(ExperimentLedgerModel):
     artifact_id: NonEmptyStr
     type: NonEmptyStr
-    source: Literal["local_path", "remote_uri", "hf_hub", "event_ref"]
+    source: Literal["local_path", "sandbox", "remote_uri", "hf_hub", "event_ref"]
     uri: NonEmptyStr | None = None
     digest: NonEmptyStr | None = None
 
@@ -527,11 +570,27 @@ class ArtifactRefRecord(ExperimentLedgerModel):
         "tool",
         "job",
         "local_path",
+        "sandbox",
         "remote_uri",
         "hf_hub",
         "event_ref",
         "manual",
     ]
+    ref_uri: NonEmptyStr | None = None
+    locator: ArtifactLocator | None = None
+    lifecycle: Literal[
+        "planned",
+        "recorded",
+        "available",
+        "consumed",
+        "archived",
+        "deleted",
+        "unknown",
+    ] | None = None
+    mime_type: NonEmptyStr | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    producer: dict[str, Any] | None = None
+    export_policy: dict[str, Any] | None = None
     source_tool_call_id: NonEmptyStr | None = None
     source_job_id: NonEmptyStr | None = None
     path: NonEmptyStr | None = None
