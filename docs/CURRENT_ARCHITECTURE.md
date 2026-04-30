@@ -11,8 +11,8 @@ means product/runtime direction and must not be treated as shipped behavior.
 
 Current behavior:
 
-- The repo is still branded `ML Intern` in `README.md` and the CLI entrypoint is
-  `ml-intern`.
+- The README is branded ML Junior. The installed CLI entrypoints are
+  `ml-junior` and the retained compatibility alias `ml-intern`.
 - The runtime is a Python async agent package, a FastAPI backend, and a Vite
   frontend built into the production Docker image.
 - The agent loop is queue-driven. Inputs become `Submission` objects containing
@@ -395,7 +395,10 @@ Current slash command registry/completion additions:
 
 Headless CLI:
 
-- `ml-intern "prompt text"` runs one yolo-mode turn and exits.
+- `ml-junior "prompt text"` runs one local-mode turn and exits. The
+  compatibility alias `ml-intern "prompt text"` uses the same entrypoint.
+- Approval-gated tool calls stop headless execution and print the pending
+  approvals unless the user passes `--yolo` / `--auto-approve`.
 
 ## Session Manager
 
@@ -451,7 +454,9 @@ Current behavior:
   on the local filesystem.
 - Local mode adds system-prompt context saying there is no sandbox and `/app`
   paths do not apply.
-- Headless mode sets `yolo_mode=True`, auto-approving approval-gated calls.
+- Headless mode sets `yolo_mode=True` only when `--yolo` /
+  `--auto-approve` is passed. Without that flag, approval-gated calls are
+  reported and the headless run exits without executing them.
 - Backend-created sessions use sandbox mode by default. Sandbox mode exposes
   `sandbox_create`, `bash`, `read`, `write`, and `edit` backed by a Hugging Face
   Space sandbox.
@@ -476,7 +481,8 @@ Current limitations:
 - Workflow state is a read-only projection. Flow catalog/preview are shipped;
   flow start/pause/resume/fork are planned only.
 - Provider, HF, MCP, Docker build, and sandbox paths can be network-dependent.
-- Some docs and package names still say ML Intern rather than ML Junior.
+- Some internal docs, package names, and compatibility paths still say
+  ML Intern rather than ML Junior.
 - `/api/health` is a process health check, not an end-to-end LLM/tool smoke.
 - `backend/start.sh` exits 0 after any uvicorn non-zero exit, so Docker start
   must be paired with an HTTP health check.
