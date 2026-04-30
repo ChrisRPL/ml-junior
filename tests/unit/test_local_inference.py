@@ -4,6 +4,16 @@ from dataclasses import asdict
 from types import SimpleNamespace
 
 from agent.core.local_inference import (
+    LOCAL_INFERENCE_HEALTH_PROBE,
+    LOCAL_INFERENCE_MODELS_PROBE,
+    LOCAL_INFERENCE_PROBE_AVAILABLE,
+    LOCAL_INFERENCE_PROBE_CONFIG_ERROR,
+    LOCAL_INFERENCE_PROBE_MALFORMED,
+    LOCAL_INFERENCE_PROBE_MODEL_MISSING,
+    LOCAL_INFERENCE_PROBE_TOOL_SUPPORT_UNKNOWN,
+    LOCAL_INFERENCE_PROBE_UNAVAILABLE,
+    build_local_inference_probe_descriptors,
+    classify_local_inference_probe_result,
     describe_local_inference_runtime,
     list_local_inference_runtime_descriptors,
 )
@@ -119,3 +129,155 @@ def test_runtime_descriptor_reports_unsupported_runtime_without_raising():
         descriptor.configuration_error
     )
     assert asdict(descriptor.capabilities) == EXPECTED_UNKNOWN_CAPABILITIES
+
+
+def test_probe_descriptors_use_openai_compatible_models_endpoint():
+    descriptor = describe_local_inference_runtime("ollama", env={})
+
+    health_probe, models_probe = build_local_inference_probe_descriptors(
+        descriptor,
+        expected_model="local/ollama/llama3.2:latest",
+    )
+
+    assert health_probe.runtime_id == "ollama"
+    assert health_probe.probe_type == LOCAL_INFERENCE_HEALTH_PROBE
+    assert health_probe.method == "GET"
+    assert health_probe.endpoint_path == "/models"
+    assert health_probe.url == "http://localhost:11434/v1/models"
+    assert health_probe.expected_model is None
+    assert health_probe.configuration_error is None
+
+    assert models_probe.runtime_id == "ollama"
+    assert models_probe.probe_type == LOCAL_INFERENCE_MODELS_PROBE
+    assert models_probe.method == "GET"
+    assert models_probe.url == "http://localhost:11434/v1/models"
+    assert models_probe.expected_model == "local/ollama/llama3.2:latest"
+    assert models_probe.configuration_error is None
+
+
+def test_probe_descriptors_preserve_configuration_errors_without_urls():
+    descriptor = describe_local_inference_runtime(
+        "llamacpp",
+        env={"MLJ_LOCAL_LLAMACPP_BASE_URL": "https://api.openai.com/v1"},
+    )
+
+    health_probe, models_probe = build_local_inference_probe_descriptors(
+        descriptor,
+        expected_model="qwen3-coder",
+    )
+
+    assert health_probe.url is None
+    assert health_probe.configuration_error == descriptor.configuration_error
+    assert models_probe.url is None
+    assert models_probe.configuration_error == descriptor.configuration_error
+
+    classification = classify_local_inference_probe_result(
+        models_probe,
+        {"data": [{"id": "qwen3-coder"}]},
+    )
+
+    assert classification.status == LOCAL_INFERENCE_PROBE_CONFIG_ERROR
+    assert "host must be localhost or a private IP address" in (
+        classification.message
+    )
+
+
+def test_health_probe_classifies_well_formed_models_payload_as_available():
+    descriptor = describe_local_inference_runtime("ollama", env={})
+    health_probe, _models_probe = build_local_inference_probe_descriptors(descriptor)
+
+    classification = classify_local_inference_probe_result(
+        health_probe,
+        {"object": "list", "data": []},
+    )
+
+    assert classification.status == LOCAL_INFERENCE_PROBE_AVAILABLE
+    assert classification.probe_type == LOCAL_INFERENCE_HEALTH_PROBE
+
+
+def test_probe_classifies_caller_supplied_errors_as_unavailable():
+    descriptor = describe_local_inference_runtime("ollama", env={})
+    health_probe, _models_probe = build_local_inference_probe_descriptors(descriptor)
+
+    classification = classify_local_inference_probe_result(
+        health_probe,
+        error=TimeoutError("connection refused"),
+    )
+
+    assert classification.status == LOCAL_INFERENCE_PROBE_UNAVAILABLE
+    assert classification.error == "connection refused"
+
+
+def test_models_probe_classifies_listed_model_with_tool_support_as_available():
+    descriptor = describe_local_inference_runtime("ollama", env={})
+    _health_probe, models_probe = build_local_inference_probe_descriptors(
+        descriptor,
+        expected_model="local/ollama/llama3.2:latest",
+    )
+
+    classification = classify_local_inference_probe_result(
+        models_probe,
+        {
+            "object": "list",
+            "data": [
+                {
+                    "id": "llama3.2:latest",
+                    "object": "model",
+                    "capabilities": {"tool_calling": "supported"},
+                }
+            ],
+        },
+    )
+
+    assert classification.status == LOCAL_INFERENCE_PROBE_AVAILABLE
+    assert classification.model_id == "llama3.2:latest"
+    assert classification.tool_calling == "supported"
+
+
+def test_models_probe_classifies_missing_model():
+    descriptor = describe_local_inference_runtime("llamacpp", env={})
+    _health_probe, models_probe = build_local_inference_probe_descriptors(
+        descriptor,
+        expected_model="qwen3-coder",
+    )
+
+    classification = classify_local_inference_probe_result(
+        models_probe,
+        {"data": [{"id": "other-model", "supports_tools": True}]},
+    )
+
+    assert classification.status == LOCAL_INFERENCE_PROBE_MODEL_MISSING
+    assert classification.model_id == "qwen3-coder"
+
+
+def test_models_probe_classifies_malformed_payloads():
+    descriptor = describe_local_inference_runtime("ollama", env={})
+    _health_probe, models_probe = build_local_inference_probe_descriptors(
+        descriptor,
+        expected_model="llama3.2:latest",
+    )
+
+    classification = classify_local_inference_probe_result(
+        models_probe,
+        {"data": {"id": "llama3.2:latest"}},
+    )
+
+    assert classification.status == LOCAL_INFERENCE_PROBE_MALFORMED
+    assert "/v1/models payload data must be a list" in classification.message
+
+
+def test_models_probe_classifies_unknown_tool_support_separately():
+    descriptor = describe_local_inference_runtime("ollama", env={})
+    _health_probe, models_probe = build_local_inference_probe_descriptors(
+        descriptor,
+        expected_model="llama3.2:latest",
+    )
+
+    classification = classify_local_inference_probe_result(
+        models_probe,
+        {"data": [{"id": "llama3.2:latest", "object": "model"}]},
+    )
+
+    assert classification.status == LOCAL_INFERENCE_PROBE_TOOL_SUPPORT_UNKNOWN
+    assert classification.model_id == "llama3.2:latest"
+    assert classification.tool_calling == "unknown"
