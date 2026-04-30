@@ -151,6 +151,10 @@ Current behavior:
 - `yolo_mode` and compatible autonomy/approval modes skip approval while
   preserving risk metadata. `confirm_cpu_jobs` and `auto_file_upload` remain
   policy inputs.
+- A pure HF compute risk helper can classify local HF Jobs flavor metadata into
+  risk tier, spend class, budget-impact text, uncertainty flags, duration
+  source, and approval-metadata visibility. It uses local flavor/price
+  snapshots only and is not wired into `PolicyEngine` yet.
 
 Current limitations:
 
@@ -267,10 +271,12 @@ Current behavior:
   quota.
 - Active job and artifact records also have an inert append-only SQLite store
   for caller-supplied refs. Artifact refs can carry schema-only locator
-  metadata (`ref_uri`, typed locator, lifecycle, MIME type, size, producer, and
-  export policy), including sandbox locators. Nothing wires that store to job
-  launch, polling, artifact discovery, routes, export behavior, or workflow
-  producers yet.
+  metadata. New refs should use `ref_uri` as the stable MLJ handle
+  (`mlj-artifact://session/<session_id>/<artifact_id>`), while storage-specific
+  paths and URLs live in typed locator metadata plus compatibility `path`/`uri`
+  fields. Existing external `ref_uri` values still validate for compatibility.
+  Nothing wires that store to job launch, polling, artifact discovery, routes,
+  export behavior, or workflow producers yet.
 - Dataset lineage currently exists as closed, caller-supplied manifest/diff
   models, an inert transform/filter/augment/merge lineage DAG schema, and pure
   sha256 blob digest/path conventions. Experiment run records can reference

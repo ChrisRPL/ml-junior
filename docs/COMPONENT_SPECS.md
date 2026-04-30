@@ -198,13 +198,20 @@ Current behavior:
 - Persistence: HF Jobs and Hub repos are external persistent side effects.
   Running job ids are tracked in session memory for interrupt cleanup. An inert
   append-only SQLite store can persist explicit active-job and artifact refs,
-  including schema-only artifact locator/lifecycle/export-policy metadata, but
-  runtime tools do not write to it yet.
+  including schema-only artifact locator/lifecycle/export-policy metadata.
+  Artifact `ref_uri` is now documented as the stable MLJ handle; local paths,
+  Hub URLs, sandbox refs, remote URLs, and event pointers belong in locator or
+  compatibility fields. Runtime tools do not write to this store yet.
+- Policy metadata helpers: a pure HF compute risk helper can estimate local
+  risk/spend metadata for known `jobs_tool.py` hardware flavors, including
+  scheduled and unknown hardware uncertainty. It is intentionally unwired from
+  approval decisions until the policy integration slice.
 - Failure modes: job storage is ephemeral unless scripts push artifacts to the
   Hub; missing HF token/namespace, invalid hardware, paid compute, job failure,
   repo permission errors, or network errors surface as tool failures; approved
   mutations can still overwrite or delete remote content.
 - Tests: `tests/unit/test_policy_engine.py`,
+  `tests/unit/test_hf_compute_risk.py`,
   `tests/unit/test_tool_router_approval.py`,
   `tests/unit/test_job_artifact_refs.py`,
   `tests/unit/test_experiment_ledger.py`, and workflow/progress tests that

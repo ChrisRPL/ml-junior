@@ -211,6 +211,10 @@ Current behavior:
   require approval.
 - Approval metadata includes risk, side effects, rollback, budget impact,
   credential usage, and reason.
+- A pure local HF compute risk helper can prepare risk/spend metadata from
+  known hardware flavors and user-supplied duration, including uncertainty for
+  scheduled or unknown hardware. It is not yet wired into approval enforcement
+  or budget mutation.
 - Running job ids are tracked in session memory and cancel attempts are made on
   interrupt.
 - Claude quota is charged at first Anthropic message submit per session.
