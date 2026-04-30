@@ -27,6 +27,10 @@ verifier status, confidence, and blockers.
   projection from persisted event, session, and operation records.
 - `GET /api/flows` and `GET /api/flows/{template_id}/preview` expose read-only
   built-in flow metadata for UI preview.
+- The project dashboard includes read-only panels for flow definitions,
+  workflow timeline, handoff notes, evidence, artifact/job refs, and budget
+  ledger details from `ProjectSnapshot` only. Budget rows are display-only and
+  do not provide spend controls or approvals.
 - Approvals use the existing approval flow and include structured risk,
   side-effect, rollback, budget, and credential metadata from backend policy.
 - Durable event replay exists for `/api/events/{session_id}` by sequence cursor.

@@ -251,15 +251,24 @@ Current behavior:
 - The projection is recomputed from persisted `AgentEvent` envelopes, the
   durable `SessionRecord`, and durable `OperationRecord` rows. It exposes
   status, phase, plan items, blockers, pending approvals, active jobs,
-  operation refs, human requests, evidence summary, live tracking placeholders,
-  last event sequence, and resume cursor metadata.
+  operation refs, human requests, budget summaries, evidence summary, live
+  tracking placeholders, last event sequence, and resume cursor metadata.
 - `WorkflowResumeState.can_resume` is `false` with reason
   `executable_resume_not_implemented`; the cursor is informational for replay
   and UI hydration.
 - Phase events, plan updates, approval events, tool state/output events, active
   job refs, artifact/metric/log refs, evidence items, evidence claim links,
-  decision/proof records, human requests, and verifier verdicts project into
-  workflow state when those events exist.
+  decision/proof records, budget records, human requests, and verifier verdicts
+  project into workflow state when those events exist.
+- Budget projection is read-only. It aggregates recorded budget limit/usage
+  events into totals and ledger rows but does not reserve, spend, or enforce
+  quota.
+- Active job and artifact records also have an inert append-only SQLite store
+  for caller-supplied refs. Nothing wires that store to job launch, polling,
+  artifact discovery, routes, or workflow producers yet.
+- Dataset lineage currently exists as closed, caller-supplied manifest/diff
+  models only. It does not walk files, write blob caches, call datasets/HF
+  services, or emit runtime events.
 - Built-in flow templates live under `backend/builtin_flow_templates/`.
   `GET /api/flows` returns the read-only catalog. `GET
   /api/flows/{template_id}/preview` returns inputs, required inputs, budgets,
@@ -319,8 +328,9 @@ Current agent/backend event types validated or projected in code:
   records and project into `evidence_summary`, but do not sign, export, or
   block final answers.
 - `budget.limit_recorded` and `budget.usage_recorded`: inert budget limit and
-  usage ledger metadata. They validate explicit caller-supplied records but do
-  not enforce spend caps, consume quota, or launch/poll jobs.
+  usage ledger metadata. They validate explicit caller-supplied records and
+  project into `WorkflowState.budget`, but do not enforce spend caps, consume
+  quota, or launch/poll jobs.
 - `human_request.requested` and `human_request.resolved`: human-in-the-loop
   workflow metadata.
 - `compacted`: context compaction changed token usage.
@@ -475,6 +485,10 @@ Current behavior:
   defaults. Endpoint resolution is pure validation: it allows localhost,
   container-host aliases, and private IP addresses, and it does not probe the
   daemon or make a provider call.
+- Local inference probe helpers are also pure metadata/classification helpers.
+  They build intended `/v1/models` probe descriptors and classify
+  caller-supplied payloads or errors; they do not perform network I/O or start
+  local daemons.
 - Backend-created sessions use sandbox mode by default. Sandbox mode exposes
   `sandbox_create`, `bash`, `read`, `write`, and `edit` backed by a Hugging Face
   Space sandbox.

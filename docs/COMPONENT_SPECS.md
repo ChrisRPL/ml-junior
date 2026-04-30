@@ -196,7 +196,9 @@ Current behavior:
 - Outputs: formatted job/repo status, job log events, job URLs, uploaded file
   URLs or PR URLs, and repository mutation status.
 - Persistence: HF Jobs and Hub repos are external persistent side effects.
-  Running job ids are tracked in session memory for interrupt cleanup.
+  Running job ids are tracked in session memory for interrupt cleanup. An inert
+  append-only SQLite store can persist explicit active-job and artifact refs,
+  but runtime tools do not write to it yet.
 - Failure modes: job storage is ephemeral unless scripts push artifacts to the
   Hub; missing HF token/namespace, invalid hardware, paid compute, job failure,
   repo permission errors, or network errors surface as tool failures; approved

@@ -192,10 +192,13 @@ Current behavior:
 Current limits:
 
 - Inert budget limit and usage ledger records can now be validated as
-  `AgentEvent` payloads, but no runtime producer emits them yet.
+  `AgentEvent` payloads and projected into workflow state, but no runtime
+  producer emits them yet.
 - There is still no hard spend cap for HF Jobs, and the budget ledger does not
   enforce, reserve, or consume quota.
-- Running job refs are memory-only until projected into durable session refs.
+- Running job refs are still produced by runtime memory, while an inert
+  append-only job/artifact store exists only for explicit caller-supplied refs.
+  It is not wired to job launch, polling, cancellation, or artifact discovery.
 - Job storage is ephemeral unless scripts publish artifacts to the Hub.
 
 Target behavior:
