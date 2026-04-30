@@ -265,6 +265,9 @@ Current behavior:
   /api/flows/{template_id}/preview` returns inputs, required inputs, budgets,
   phases, approvals, expected outputs/artifacts, verifier checks, verifier
   catalog coverage, risky operations, and source metadata.
+- `GET /api/flow-sources` returns read-only source descriptors. `builtin` is
+  available and trusted; `custom` and `community` are reserved disabled sources
+  with no upload, local directory loading, or remote fetch behavior.
 - CLI `/flows` and `/flow preview <id>` use the same backend flow-template
   helpers and are read-only.
 
@@ -311,6 +314,9 @@ Current agent/backend event types validated or projected in code:
   ledger metadata.
 - `evidence_item.recorded`, `evidence_claim_link.recorded`, and
   `verifier.completed`: evidence/verifier metadata for workflow projection.
+- `decision_card.recorded` and `proof_bundle.recorded`: inert decision/proof
+  metadata for future audit bundles. They validate explicit caller-supplied
+  records but do not sign, export, or block final answers.
 - `human_request.requested` and `human_request.resolved`: human-in-the-loop
   workflow metadata.
 - `compacted`: context compaction changed token usage.
@@ -337,6 +343,8 @@ Backend routes:
 - `GET /api/health/llm`: network/API-key-dependent LLM health probe.
 - `GET /api/config/model`: current and available models.
 - `GET /api/flows`: read-only built-in flow catalog.
+- `GET /api/flow-sources`: read-only source descriptors for builtin, custom,
+  and community template sources.
 - `GET /api/flows/{template_id}/preview`: read-only flow template preview.
 - `POST /api/title`: short title generation through an LLM call.
 - `POST /api/session`: create session.
@@ -457,6 +465,12 @@ Current behavior:
 - Headless mode sets `yolo_mode=True` only when `--yolo` /
   `--auto-approve` is passed. Without that flag, approval-gated calls are
   reported and the headless run exits without executing them.
+- Local model ids `local/ollama/<model>` and `local/llamacpp/<alias>` resolve
+  to OpenAI-compatible local `/v1` endpoints with a dummy local API key. Base
+  URLs come from local inference env vars, optional config fields, then
+  defaults. Endpoint resolution is pure validation: it allows localhost,
+  container-host aliases, and private IP addresses, and it does not probe the
+  daemon or make a provider call.
 - Backend-created sessions use sandbox mode by default. Sandbox mode exposes
   `sandbox_create`, `bash`, `read`, `write`, and `edit` backed by a Hugging Face
   Space sandbox.
