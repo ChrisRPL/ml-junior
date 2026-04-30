@@ -302,6 +302,17 @@ class ExperimentLogRefPayload(ExperimentLedgerPayload):
     label: NonEmptyStr | None = None
 
 
+class MetricRecordedPayload(ExperimentMetricRecordPayload):
+    session_id: NonEmptyStr
+    metric_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+
+
+class LogRefRecordedPayload(ExperimentLogRefPayload):
+    session_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+
+
 class ExperimentArtifactRefPayload(ExperimentLedgerPayload):
     artifact_id: NonEmptyStr
     type: NonEmptyStr
@@ -440,6 +451,8 @@ EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
     "handoff.summary_created": HandoffSummaryCreatedPayload,
     "dataset_snapshot.recorded": DatasetSnapshotRecordedPayload,
     "code_snapshot.recorded": CodeSnapshotRecordedPayload,
+    "metric.recorded": MetricRecordedPayload,
+    "log_ref.recorded": LogRefRecordedPayload,
     "experiment.run_recorded": ExperimentRunRecordedPayload,
     "active_job.recorded": ActiveJobRecordedPayload,
     "artifact_ref.recorded": ArtifactRefRecordedPayload,

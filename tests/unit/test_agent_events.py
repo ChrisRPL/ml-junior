@@ -476,6 +476,31 @@ def _valid_artifact_ref_recorded_payload() -> dict:
     }
 
 
+def _valid_metric_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "metric_id": " metric-1 ",
+        "source_event_sequence": 10,
+        "name": " accuracy ",
+        "value": 0.91,
+        "source": "tool",
+        "step": 3,
+        "unit": " ratio ",
+        "recorded_at": " 2026-04-29T10:06:00Z ",
+    }
+
+
+def _valid_log_ref_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "log_id": " log-1 ",
+        "source_event_sequence": 11,
+        "source": "stdout",
+        "uri": " file:///tmp/train.log ",
+        "label": " Training log ",
+    }
+
+
 def test_dataset_snapshot_recorded_payload_validates_and_normalizes():
     event = AgentEvent(
         session_id="session-a",
@@ -687,6 +712,124 @@ def test_artifact_ref_recorded_payload_validates_and_normalizes():
     assert event.data["label"] == "Best checkpoint"
 
 
+def test_metric_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=14,
+        event_type="metric.recorded",
+        data=_valid_metric_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["metric_id"] == "metric-1"
+    assert event.data["name"] == "accuracy"
+    assert event.data["unit"] == "ratio"
+    assert event.data["recorded_at"] == "2026-04-29T10:06:00Z"
+
+
+def test_log_ref_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=15,
+        event_type="log_ref.recorded",
+        data=_valid_log_ref_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["log_id"] == "log-1"
+    assert event.data["uri"] == "file:///tmp/train.log"
+    assert event.data["label"] == "Training log"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory"),
+    [
+        ("metric.recorded", _valid_metric_recorded_payload),
+        ("log_ref.recorded", _valid_log_ref_recorded_payload),
+    ],
+)
+def test_standalone_metric_log_payloads_reject_unknown_top_level_fields(
+    event_type,
+    payload_factory,
+):
+    payload = payload_factory()
+    payload["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=16,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "path"),
+    [
+        ("metric.recorded", _valid_metric_recorded_payload, ("session_id",)),
+        ("metric.recorded", _valid_metric_recorded_payload, ("metric_id",)),
+        ("metric.recorded", _valid_metric_recorded_payload, ("name",)),
+        ("metric.recorded", _valid_metric_recorded_payload, ("unit",)),
+        ("log_ref.recorded", _valid_log_ref_recorded_payload, ("session_id",)),
+        ("log_ref.recorded", _valid_log_ref_recorded_payload, ("log_id",)),
+        ("log_ref.recorded", _valid_log_ref_recorded_payload, ("label",)),
+    ],
+)
+def test_standalone_metric_log_payloads_reject_empty_required_ids_and_text(
+    event_type,
+    payload_factory,
+    path,
+):
+    payload = payload_factory()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = ""
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=16,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "field", "value"),
+    [
+        ("metric.recorded", _valid_metric_recorded_payload, "source", "scan"),
+        ("metric.recorded", _valid_metric_recorded_payload, "step", -1),
+        ("log_ref.recorded", _valid_log_ref_recorded_payload, "source", "scan"),
+        (
+            "log_ref.recorded",
+            _valid_log_ref_recorded_payload,
+            "source_event_sequence",
+            0,
+        ),
+    ],
+)
+def test_standalone_metric_log_payloads_reject_invalid_values(
+    event_type,
+    payload_factory,
+    field,
+    value,
+):
+    payload = payload_factory()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=16,
+            event_type=event_type,
+            data=payload,
+        )
+
+
 @pytest.mark.parametrize(
     ("event_type", "payload_factory"),
     [
@@ -716,7 +859,11 @@ def test_job_artifact_payloads_reject_unknown_top_level_fields(
         ("active_job.recorded", _valid_active_job_recorded_payload, ("session_id",)),
         ("active_job.recorded", _valid_active_job_recorded_payload, ("job_id",)),
         ("active_job.recorded", _valid_active_job_recorded_payload, ("label",)),
-        ("artifact_ref.recorded", _valid_artifact_ref_recorded_payload, ("session_id",)),
+        (
+            "artifact_ref.recorded",
+            _valid_artifact_ref_recorded_payload,
+            ("session_id",),
+        ),
         (
             "artifact_ref.recorded",
             _valid_artifact_ref_recorded_payload,

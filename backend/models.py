@@ -359,6 +359,21 @@ class ExperimentLogRef(ExperimentLedgerModel):
     label: NonEmptyStr | None = None
 
 
+class MetricRecord(ExperimentMetricRecord):
+    """Standalone inert metric record for append-only experiment ledger storage."""
+
+    session_id: NonEmptyStr
+    metric_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+
+
+class LogRefRecord(ExperimentLogRef):
+    """Standalone inert log reference for append-only experiment ledger storage."""
+
+    session_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+
+
 class ExperimentArtifactRef(ExperimentLedgerModel):
     artifact_id: NonEmptyStr
     type: NonEmptyStr

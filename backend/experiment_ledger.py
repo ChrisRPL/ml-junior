@@ -3,18 +3,46 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias, TypeVar
 
 from agent.core.events import AgentEvent
 from agent.core.redaction import redact_value
-from backend.models import CodeSnapshotRecord, DatasetSnapshotRecord, ExperimentRunRecord
+from backend.models import (
+    ArtifactRefRecord,
+    CodeSnapshotRecord,
+    DatasetSnapshotRecord,
+    ExperimentRunRecord,
+    LogRefRecord,
+    MetricRecord,
+)
 
 
 EXPERIMENT_RUN_RECORDED_EVENT = "experiment.run_recorded"
 DATASET_SNAPSHOT_RECORDED_EVENT = "dataset_snapshot.recorded"
 CODE_SNAPSHOT_RECORDED_EVENT = "code_snapshot.recorded"
+METRIC_RECORDED_EVENT = "metric.recorded"
+LOG_REF_RECORDED_EVENT = "log_ref.recorded"
+ARTIFACT_REF_RECORDED_EVENT = "artifact_ref.recorded"
+
+LedgerRecord: TypeAlias = (
+    ExperimentRunRecord
+    | DatasetSnapshotRecord
+    | CodeSnapshotRecord
+    | MetricRecord
+    | LogRefRecord
+    | ArtifactRefRecord
+)
+LedgerRecordT = TypeVar(
+    "LedgerRecordT",
+    ExperimentRunRecord,
+    DatasetSnapshotRecord,
+    CodeSnapshotRecord,
+    MetricRecord,
+    LogRefRecord,
+    ArtifactRefRecord,
+)
 
 
 class ExperimentLedgerError(ValueError):
@@ -36,6 +64,16 @@ def generate_code_snapshot_id() -> str:
     return f"code-snapshot-{uuid.uuid4().hex}"
 
 
+def generate_metric_id() -> str:
+    """Return an opaque metric identifier."""
+    return f"metric-{uuid.uuid4().hex}"
+
+
+def generate_log_id() -> str:
+    """Return an opaque log reference identifier."""
+    return f"log-{uuid.uuid4().hex}"
+
+
 def experiment_run_recorded_payload(record: ExperimentRunRecord) -> dict[str, Any]:
     """Serialize an experiment run record into an AgentEvent payload."""
     return _record_payload(record)
@@ -50,6 +88,21 @@ def dataset_snapshot_recorded_payload(
 
 def code_snapshot_recorded_payload(record: CodeSnapshotRecord) -> dict[str, Any]:
     """Serialize a code snapshot record into an AgentEvent payload."""
+    return _record_payload(record)
+
+
+def metric_recorded_payload(record: MetricRecord) -> dict[str, Any]:
+    """Serialize a standalone metric record into an AgentEvent payload."""
+    return _record_payload(record)
+
+
+def log_ref_recorded_payload(record: LogRefRecord) -> dict[str, Any]:
+    """Serialize a standalone log reference record into an AgentEvent payload."""
+    return _record_payload(record)
+
+
+def artifact_ref_recorded_payload(record: ArtifactRefRecord) -> dict[str, Any]:
+    """Serialize a canonical artifact reference record into an AgentEvent payload."""
     return _record_payload(record)
 
 
@@ -88,6 +141,45 @@ def code_snapshot_record_from_event(event: AgentEvent) -> CodeSnapshotRecord:
     if record.session_id != event.session_id:
         raise ExperimentLedgerError(
             "code snapshot event session_id does not match record session_id"
+        )
+    return record
+
+
+def metric_record_from_event(event: AgentEvent) -> MetricRecord:
+    """Validate a metric.recorded event as a standalone metric record."""
+    if event.event_type != METRIC_RECORDED_EVENT:
+        raise ExperimentLedgerError(f"Expected {METRIC_RECORDED_EVENT}")
+
+    record = MetricRecord.model_validate(event.data or {})
+    if record.session_id != event.session_id:
+        raise ExperimentLedgerError(
+            "metric event session_id does not match record session_id"
+        )
+    return record
+
+
+def log_ref_record_from_event(event: AgentEvent) -> LogRefRecord:
+    """Validate a log_ref.recorded event as a standalone log reference record."""
+    if event.event_type != LOG_REF_RECORDED_EVENT:
+        raise ExperimentLedgerError(f"Expected {LOG_REF_RECORDED_EVENT}")
+
+    record = LogRefRecord.model_validate(event.data or {})
+    if record.session_id != event.session_id:
+        raise ExperimentLedgerError(
+            "log ref event session_id does not match record session_id"
+        )
+    return record
+
+
+def artifact_ref_record_from_event(event: AgentEvent) -> ArtifactRefRecord:
+    """Validate an artifact_ref.recorded event as a canonical artifact ref record."""
+    if event.event_type != ARTIFACT_REF_RECORDED_EVENT:
+        raise ExperimentLedgerError(f"Expected {ARTIFACT_REF_RECORDED_EVENT}")
+
+    record = ArtifactRefRecord.model_validate(event.data or {})
+    if record.session_id != event.session_id:
+        raise ExperimentLedgerError(
+            "artifact ref event session_id does not match record session_id"
         )
     return record
 
@@ -137,6 +229,51 @@ def project_code_snapshots(
             session_id,
             events,
             CODE_SNAPSHOT_RECORDED_EVENT,
+        )
+    ]
+
+
+def project_metrics(
+    session_id: str,
+    events: Sequence[AgentEvent],
+) -> list[MetricRecord]:
+    """Project standalone metric records from supplied events only."""
+    return [
+        metric_record_from_event(event)
+        for event in _ordered_session_events(
+            session_id,
+            events,
+            METRIC_RECORDED_EVENT,
+        )
+    ]
+
+
+def project_log_refs(
+    session_id: str,
+    events: Sequence[AgentEvent],
+) -> list[LogRefRecord]:
+    """Project standalone log reference records from supplied events only."""
+    return [
+        log_ref_record_from_event(event)
+        for event in _ordered_session_events(
+            session_id,
+            events,
+            LOG_REF_RECORDED_EVENT,
+        )
+    ]
+
+
+def project_artifact_refs(
+    session_id: str,
+    events: Sequence[AgentEvent],
+) -> list[ArtifactRefRecord]:
+    """Project canonical artifact reference records from supplied events only."""
+    return [
+        artifact_ref_record_from_event(event)
+        for event in _ordered_session_events(
+            session_id,
+            events,
+            ARTIFACT_REF_RECORDED_EVENT,
         )
     ]
 
@@ -280,6 +417,63 @@ class SQLiteExperimentLedgerStore:
             raise ExperimentLedgerError("code snapshot was not stored")
         return stored
 
+    def create_metric(self, record: MetricRecord) -> MetricRecord:
+        """Persist a redacted standalone metric record and return the stored copy."""
+        record = MetricRecord.model_validate(record)
+        _validate_required_text("session_id", record.session_id)
+        _validate_required_text("metric_id", record.metric_id)
+
+        self._insert_record(
+            table_name="experiment_metrics",
+            id_column="metric_id",
+            id_value=record.metric_id,
+            record=record,
+            duplicate_label="metric",
+        )
+
+        stored = self.get_metric(record.session_id, record.metric_id)
+        if stored is None:
+            raise ExperimentLedgerError("metric was not stored")
+        return stored
+
+    def create_log_ref(self, record: LogRefRecord) -> LogRefRecord:
+        """Persist a redacted standalone log reference and return the stored copy."""
+        record = LogRefRecord.model_validate(record)
+        _validate_required_text("session_id", record.session_id)
+        _validate_required_text("log_id", record.log_id)
+
+        self._insert_record(
+            table_name="experiment_log_refs",
+            id_column="log_id",
+            id_value=record.log_id,
+            record=record,
+            duplicate_label="log ref",
+        )
+
+        stored = self.get_log_ref(record.session_id, record.log_id)
+        if stored is None:
+            raise ExperimentLedgerError("log ref was not stored")
+        return stored
+
+    def create_artifact_ref(self, record: ArtifactRefRecord) -> ArtifactRefRecord:
+        """Persist a redacted canonical artifact ref and return the stored copy."""
+        record = ArtifactRefRecord.model_validate(record)
+        _validate_required_text("session_id", record.session_id)
+        _validate_required_text("artifact_id", record.artifact_id)
+
+        self._insert_record(
+            table_name="artifact_refs",
+            id_column="artifact_id",
+            id_value=record.artifact_id,
+            record=record,
+            duplicate_label="artifact ref",
+        )
+
+        stored = self.get_artifact_ref(record.session_id, record.artifact_id)
+        if stored is None:
+            raise ExperimentLedgerError("artifact ref was not stored")
+        return stored
+
     def get(self, session_id: str, run_id: str) -> ExperimentRunRecord | None:
         """Return one experiment run by session and run id, or None."""
         row = self._connection.execute(
@@ -330,6 +524,40 @@ class SQLiteExperimentLedgerStore:
             return None
         return _code_snapshot_record_from_json(row["record_json"])
 
+    def get_metric(self, session_id: str, metric_id: str) -> MetricRecord | None:
+        """Return one standalone metric by session and metric id, or None."""
+        return self._get_record(
+            "experiment_metrics",
+            "metric_id",
+            session_id,
+            metric_id,
+            _metric_record_from_json,
+        )
+
+    def get_log_ref(self, session_id: str, log_id: str) -> LogRefRecord | None:
+        """Return one standalone log reference by session and log id, or None."""
+        return self._get_record(
+            "experiment_log_refs",
+            "log_id",
+            session_id,
+            log_id,
+            _log_ref_record_from_json,
+        )
+
+    def get_artifact_ref(
+        self,
+        session_id: str,
+        artifact_id: str,
+    ) -> ArtifactRefRecord | None:
+        """Return one canonical artifact reference by session and artifact id."""
+        return self._get_record(
+            "artifact_refs",
+            "artifact_id",
+            session_id,
+            artifact_id,
+            _artifact_ref_record_from_json,
+        )
+
     def list(
         self,
         session_id: str,
@@ -370,6 +598,33 @@ class SQLiteExperimentLedgerStore:
         """Return session code snapshots in append order."""
         rows = self._list_rows("code_snapshots", session_id, limit)
         return [_code_snapshot_record_from_json(row["record_json"]) for row in rows]
+
+    def list_metrics(
+        self,
+        session_id: str,
+        limit: int | None = None,
+    ) -> list[MetricRecord]:
+        """Return session standalone metrics in append order."""
+        rows = self._list_rows("experiment_metrics", session_id, limit)
+        return [_metric_record_from_json(row["record_json"]) for row in rows]
+
+    def list_log_refs(
+        self,
+        session_id: str,
+        limit: int | None = None,
+    ) -> list[LogRefRecord]:
+        """Return session standalone log references in append order."""
+        rows = self._list_rows("experiment_log_refs", session_id, limit)
+        return [_log_ref_record_from_json(row["record_json"]) for row in rows]
+
+    def list_artifact_refs(
+        self,
+        session_id: str,
+        limit: int | None = None,
+    ) -> list[ArtifactRefRecord]:
+        """Return session canonical artifact references in append order."""
+        rows = self._list_rows("artifact_refs", session_id, limit)
+        return [_artifact_ref_record_from_json(row["record_json"]) for row in rows]
 
     def _initialize_schema(self) -> None:
         with self._connection:
@@ -431,6 +686,121 @@ class SQLiteExperimentLedgerStore:
                 ON code_snapshots (session_id, ledger_sequence)
                 """
             )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS experiment_metrics (
+                    ledger_sequence INTEGER PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    metric_id TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    redaction_status TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (session_id, metric_id)
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_experiment_metrics_session_sequence
+                ON experiment_metrics (session_id, ledger_sequence)
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS experiment_log_refs (
+                    ledger_sequence INTEGER PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    log_id TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    redaction_status TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (session_id, log_id)
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_experiment_log_refs_session_sequence
+                ON experiment_log_refs (session_id, ledger_sequence)
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS artifact_refs (
+                    ledger_sequence INTEGER PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    artifact_id TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    redaction_status TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (session_id, artifact_id)
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_artifact_refs_session_sequence
+                ON artifact_refs (session_id, ledger_sequence)
+                """
+            )
+
+    def _insert_record(
+        self,
+        *,
+        table_name: str,
+        id_column: str,
+        id_value: str,
+        record: LedgerRecord,
+        duplicate_label: str,
+    ) -> None:
+        record_json, redaction_status = _redacted_record_json(record)
+
+        try:
+            with self._connection:
+                self._connection.execute(
+                    f"""
+                    INSERT INTO {table_name} (
+                        session_id,
+                        {id_column},
+                        record_json,
+                        redaction_status
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        record.session_id,
+                        id_value,
+                        record_json,
+                        redaction_status,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            if _is_duplicate_error(exc, f"{table_name}.session_id"):
+                raise ExperimentLedgerError(
+                    f"{duplicate_label} already exists: "
+                    f"session_id={record.session_id} {id_column}={id_value}"
+                ) from exc
+            raise
+
+    def _get_record(
+        self,
+        table_name: str,
+        id_column: str,
+        session_id: str,
+        record_id: str,
+        parser: Callable[[str], LedgerRecordT],
+    ) -> LedgerRecordT | None:
+        row = self._connection.execute(
+            f"""
+            SELECT record_json
+            FROM {table_name}
+            WHERE session_id = ? AND {id_column} = ?
+            """,
+            (session_id, record_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return parser(row["record_json"])
 
     def _list_rows(
         self,
@@ -471,13 +841,13 @@ def _ordered_session_events(
 
 
 def _record_payload(
-    record: ExperimentRunRecord | DatasetSnapshotRecord | CodeSnapshotRecord,
+    record: LedgerRecord,
 ) -> dict[str, Any]:
     return record.model_dump(mode="json")
 
 
 def _redacted_record_json(
-    record: ExperimentRunRecord | DatasetSnapshotRecord | CodeSnapshotRecord,
+    record: LedgerRecord,
 ) -> tuple[str, str]:
     result = redact_value(_record_payload(record))
     return (
@@ -501,6 +871,18 @@ def _dataset_snapshot_record_from_json(value: str) -> DatasetSnapshotRecord:
 
 def _code_snapshot_record_from_json(value: str) -> CodeSnapshotRecord:
     return CodeSnapshotRecord.model_validate(json.loads(value))
+
+
+def _metric_record_from_json(value: str) -> MetricRecord:
+    return MetricRecord.model_validate(json.loads(value))
+
+
+def _log_ref_record_from_json(value: str) -> LogRefRecord:
+    return LogRefRecord.model_validate(json.loads(value))
+
+
+def _artifact_ref_record_from_json(value: str) -> ArtifactRefRecord:
+    return ArtifactRefRecord.model_validate(json.loads(value))
 
 
 def _validate_required_text(name: str, value: str) -> None:
