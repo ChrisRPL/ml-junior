@@ -165,6 +165,11 @@ _BUILTIN_FLOW_RESPONSE_METADATA: dict[str, dict[str, Any]] = {
         "runtime_class": "data_audit",
         "tags": ["datasets", "lineage", "quality", "privacy"],
     },
+    "dataset-card-review": {
+        "category": "data",
+        "runtime_class": "dataset_card_review",
+        "tags": ["datasets", "documentation", "cards", "quality"],
+    },
     "fine-tune-model": {
         "category": "training",
         "runtime_class": "training",
@@ -179,6 +184,21 @@ _BUILTIN_FLOW_RESPONSE_METADATA: dict[str, dict[str, Any]] = {
         "category": "research",
         "runtime_class": "research_synthesis",
         "tags": ["literature", "papers", "synthesis", "citations"],
+    },
+    "metric-selection-review": {
+        "category": "evaluation",
+        "runtime_class": "metric_selection_review",
+        "tags": ["evaluation", "metrics", "benchmarks", "review"],
+    },
+    "model-card-refresh": {
+        "category": "documentation",
+        "runtime_class": "model_card_refresh",
+        "tags": ["model-cards", "documentation", "evaluation", "hub"],
+    },
+    "paper-to-implementation-plan": {
+        "category": "research",
+        "runtime_class": "implementation_planning",
+        "tags": ["papers", "planning", "architecture", "evidence"],
     },
     "reproduce-paper": {
         "category": "research",

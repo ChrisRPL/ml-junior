@@ -11,9 +11,13 @@ import routes.agent as agent_routes
 EXPECTED_BUILTIN_IDS = [
     "build-evaluation-harness",
     "dataset-audit",
+    "dataset-card-review",
     "fine-tune-model",
     "implement-architecture",
     "literature-overview",
+    "metric-selection-review",
+    "model-card-refresh",
+    "paper-to-implementation-plan",
     "reproduce-paper",
 ]
 

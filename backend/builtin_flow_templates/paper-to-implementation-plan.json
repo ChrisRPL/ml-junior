@@ -1,0 +1,169 @@
+{
+  "id": "paper-to-implementation-plan",
+  "name": "Paper To Implementation Plan",
+  "version": "v1",
+  "description": "Turn a paper or method note into a scoped, evidence-backed implementation plan without launching runtime work.",
+  "inputs": [
+    {
+      "id": "paper_url",
+      "type": "string",
+      "required": true,
+      "description": "Paper URL, arXiv identifier, Hugging Face Papers link, or method note."
+    },
+    {
+      "id": "target_component",
+      "type": "string",
+      "required": false,
+      "description": "Architecture, loss, data pipeline, evaluation method, or other component to implement."
+    },
+    {
+      "id": "framework",
+      "type": "string",
+      "required": false,
+      "default": "pytorch",
+      "description": "Preferred implementation framework or repository stack."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 0.0,
+    "max_runs": 0,
+    "max_wall_clock_hours": 4.0,
+    "max_llm_usd": 6.0
+  },
+  "permissions": [
+    {
+      "id": "read-paper-and-references",
+      "risk": "low",
+      "action": "read",
+      "target": "paper-references-and-public-code",
+      "description": "Read public papers, linked repositories, model cards, dataset cards, and documentation."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-implementation-scope",
+      "risk": "low",
+      "action": "approve",
+      "target": "implementation-plan-scope",
+      "description": "Confirm the selected component, assumptions, and non-goals before implementation work starts."
+    }
+  ],
+  "phases": [
+    {
+      "id": "scope",
+      "name": "Scope",
+      "objective": "Define implementation target, excluded paper claims, repository constraints, and acceptance criteria.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["implementation-brief"],
+      "approval_points": ["approve-implementation-scope"],
+      "verifiers": ["scope-is-specific"]
+    },
+    {
+      "id": "paper-extraction",
+      "name": "Paper Extraction",
+      "objective": "Extract equations, architecture blocks, data assumptions, metrics, and cited implementation details.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["method-notes", "claim-table"],
+      "approval_points": [],
+      "verifiers": ["claims-have-sources"]
+    },
+    {
+      "id": "interface-plan",
+      "name": "Interface Plan",
+      "objective": "Define public inputs, outputs, tensor shapes, configuration knobs, and integration boundaries.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["interface-contract", "shape-contract"],
+      "approval_points": [],
+      "verifiers": ["interfaces-defined", "shape-contract-complete"]
+    },
+    {
+      "id": "delivery-plan",
+      "name": "Delivery Plan",
+      "objective": "Produce an ordered implementation checklist with tests, evidence expectations, and unresolved risks.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["implementation-plan", "verifier-verdict"],
+      "approval_points": [],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "implementation-brief",
+      "type": "markdown",
+      "description": "Target component, constraints, assumptions, non-goals, and acceptance criteria."
+    },
+    {
+      "id": "method-notes",
+      "type": "markdown",
+      "description": "Paper method extraction with source citations."
+    },
+    {
+      "id": "claim-table",
+      "type": "table",
+      "description": "Paper claims mapped to sections, figures, tables, and code references."
+    },
+    {
+      "id": "interface-contract",
+      "type": "markdown",
+      "description": "Inputs, outputs, configuration, and repository integration points."
+    },
+    {
+      "id": "shape-contract",
+      "type": "markdown",
+      "description": "Tensor shape expectations and module boundary assumptions."
+    },
+    {
+      "id": "implementation-plan",
+      "type": "markdown",
+      "description": "Ordered implementation tasks, tests, evidence expectations, and risks."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "implementation-checklist",
+      "type": "markdown",
+      "description": "Actionable checklist for the future implementation slice."
+    },
+    {
+      "id": "source-map",
+      "type": "table",
+      "description": "Paper sections, external references, and planned code touchpoints."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "scope-is-specific",
+      "type": "manual",
+      "description": "Implementation target, non-goals, and acceptance criteria are explicit."
+    },
+    {
+      "id": "claims-have-sources",
+      "type": "artifact",
+      "description": "Implementation requirements cite paper sections, figures, tables, repositories, or cards."
+    },
+    {
+      "id": "interfaces-defined",
+      "type": "manual",
+      "description": "Inputs, outputs, dtypes, configuration, and repository boundaries are explicit."
+    },
+    {
+      "id": "shape-contract-complete",
+      "type": "artifact",
+      "description": "Shape contract covers planned public module boundaries."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final plan claims cite method notes, claim table, interface contract, and risk notes."
+    }
+  ]
+}

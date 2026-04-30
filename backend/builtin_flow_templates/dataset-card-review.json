@@ -1,0 +1,170 @@
+{
+  "id": "dataset-card-review",
+  "name": "Dataset Card Review",
+  "version": "v1",
+  "description": "Review a dataset card for completeness, lineage, schema, intended use, limitations, and publication readiness.",
+  "inputs": [
+    {
+      "id": "dataset",
+      "type": "string",
+      "required": true,
+      "description": "Dataset identifier, local path, or card URL."
+    },
+    {
+      "id": "task",
+      "type": "string",
+      "required": false,
+      "description": "Expected task, modality, or benchmark context for the dataset."
+    },
+    {
+      "id": "draft_card",
+      "type": "string",
+      "required": false,
+      "description": "Optional draft dataset card or README content to review."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 0.0,
+    "max_runs": 0,
+    "max_wall_clock_hours": 3.0,
+    "max_llm_usd": 5.0
+  },
+  "permissions": [
+    {
+      "id": "read-dataset-card",
+      "risk": "low",
+      "action": "read",
+      "target": "dataset-card-and-public-metadata",
+      "description": "Read dataset card, repository metadata, license, task tags, and public dataset metadata."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-card-findings",
+      "risk": "low",
+      "action": "approve",
+      "target": "dataset-card-review-findings",
+      "description": "Confirm card gaps, suggested fixes, and publication caveats before handoff."
+    },
+    {
+      "id": "publish-dataset-card",
+      "risk": "high",
+      "action": "publish",
+      "target": "dataset-card-update",
+      "description": "Publish dataset card changes outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "card-intake",
+      "name": "Card Intake",
+      "objective": "Capture dataset identity, revision, license, task context, and available card sections.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["dataset-card-brief", "dataset-manifest"],
+      "approval_points": [],
+      "verifiers": ["dataset-fingerprint-captured"]
+    },
+    {
+      "id": "schema-and-usage",
+      "name": "Schema And Usage",
+      "objective": "Review schema, splits, labels, intended use, out-of-scope use, and known limitations.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["schema-review", "usage-review"],
+      "approval_points": [],
+      "verifiers": ["schema-documented"]
+    },
+    {
+      "id": "card-gap-review",
+      "name": "Card Gap Review",
+      "objective": "Identify missing card metadata, provenance, license notes, evaluation context, and risk disclosures.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["dataset-card-review"],
+      "approval_points": ["approve-card-findings"],
+      "verifiers": ["dataset-card-reviewed"]
+    },
+    {
+      "id": "handoff",
+      "name": "Handoff",
+      "objective": "Prepare card patch notes, publication decision, and evidence-backed review summary.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["card-refresh-plan", "verifier-verdict"],
+      "approval_points": ["publish-dataset-card"],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "dataset-card-brief",
+      "type": "markdown",
+      "description": "Dataset identity, task context, card state, and review scope."
+    },
+    {
+      "id": "dataset-manifest",
+      "type": "manifest",
+      "description": "Dataset source, revision, splits, and fingerprint when available."
+    },
+    {
+      "id": "schema-review",
+      "type": "markdown",
+      "description": "Features, labels, splits, examples, and schema gaps."
+    },
+    {
+      "id": "usage-review",
+      "type": "markdown",
+      "description": "Intended use, limitations, license, privacy, and safety notes."
+    },
+    {
+      "id": "dataset-card-review",
+      "type": "markdown",
+      "description": "Card completeness review and prioritized gaps."
+    },
+    {
+      "id": "card-refresh-plan",
+      "type": "markdown",
+      "description": "Suggested card updates, caveats, and publication decision notes."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "dataset-card-patch-notes",
+      "type": "markdown",
+      "description": "Proposed dataset card changes and rationale."
+    },
+    {
+      "id": "card-gap-table",
+      "type": "table",
+      "description": "Missing or weak card sections with severity and evidence."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "dataset-fingerprint-captured",
+      "type": "artifact",
+      "description": "Dataset source, revision, split mapping, and fingerprint are recorded when available."
+    },
+    {
+      "id": "schema-documented",
+      "type": "artifact",
+      "description": "Feature schema, labels, nulls, and split information are documented or explicitly missing."
+    },
+    {
+      "id": "dataset-card-reviewed",
+      "type": "artifact",
+      "description": "Dataset card metadata, license, task tags, intended use, and limitations are reviewed."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Review findings cite card text, repository metadata, manifest, and gap table entries."
+    }
+  ]
+}

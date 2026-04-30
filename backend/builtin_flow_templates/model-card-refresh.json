@@ -1,0 +1,170 @@
+{
+  "id": "model-card-refresh",
+  "name": "Model Card Refresh",
+  "version": "v1",
+  "description": "Refresh a model card with current intended use, limitations, datasets, metrics, and evidence-backed caveats.",
+  "inputs": [
+    {
+      "id": "model",
+      "type": "string",
+      "required": true,
+      "description": "Model identifier, local checkpoint, or model card URL."
+    },
+    {
+      "id": "eval_results",
+      "type": "string",
+      "required": false,
+      "description": "Optional evaluation results file, report, or benchmark reference."
+    },
+    {
+      "id": "dataset",
+      "type": "string",
+      "required": false,
+      "description": "Dataset identifier or card URL used for training or evaluation."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 0.0,
+    "max_runs": 0,
+    "max_wall_clock_hours": 3.0,
+    "max_llm_usd": 5.0
+  },
+  "permissions": [
+    {
+      "id": "read-model-card",
+      "risk": "low",
+      "action": "read",
+      "target": "model-card-dataset-card-and-eval-metadata",
+      "description": "Read model card, dataset card, evaluation summaries, repository metadata, and license information."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-model-card-refresh",
+      "risk": "low",
+      "action": "approve",
+      "target": "model-card-refresh-plan",
+      "description": "Confirm model card changes, unresolved evidence gaps, and caveats."
+    },
+    {
+      "id": "publish-model-card",
+      "risk": "high",
+      "action": "publish",
+      "target": "model-card-update",
+      "description": "Publish model card updates outside the local workspace."
+    }
+  ],
+  "phases": [
+    {
+      "id": "card-intake",
+      "name": "Card Intake",
+      "objective": "Capture model identity, license, intended use, base model or training lineage, and current card sections.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["model-card-brief"],
+      "approval_points": [],
+      "verifiers": ["model-choice-justified"]
+    },
+    {
+      "id": "evidence-review",
+      "name": "Evidence Review",
+      "objective": "Review datasets, evaluation results, metrics, limitations, and missing evidence for card claims.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["model-evidence-table", "metric-summary"],
+      "approval_points": [],
+      "verifiers": ["dataset-fingerprint-captured", "metric-recorded"]
+    },
+    {
+      "id": "refresh-plan",
+      "name": "Refresh Plan",
+      "objective": "Draft updated card sections for intended use, limitations, training data, metrics, and caveats.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["model-card-draft"],
+      "approval_points": ["approve-model-card-refresh"],
+      "verifiers": ["model-card-complete"]
+    },
+    {
+      "id": "publication-review",
+      "name": "Publication Review",
+      "objective": "Prepare final patch notes, unresolved gaps, and publication decision with evidence links.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["card-refresh-report", "verifier-verdict"],
+      "approval_points": ["publish-model-card"],
+      "verifiers": ["final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "model-card-brief",
+      "type": "markdown",
+      "description": "Model identity, purpose, license, lineage, and card refresh scope."
+    },
+    {
+      "id": "model-evidence-table",
+      "type": "table",
+      "description": "Card claims mapped to datasets, metrics, eval reports, or missing evidence."
+    },
+    {
+      "id": "metric-summary",
+      "type": "metrics",
+      "description": "Documented evaluation metrics with splits, datasets, and result sources."
+    },
+    {
+      "id": "model-card-draft",
+      "type": "markdown",
+      "description": "Updated model card sections or patch-ready README content."
+    },
+    {
+      "id": "card-refresh-report",
+      "type": "markdown",
+      "description": "Refresh summary, caveats, unresolved gaps, and publication decision notes."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "model-card-patch-notes",
+      "type": "markdown",
+      "description": "Proposed model card changes and rationale."
+    },
+    {
+      "id": "model-card-readme",
+      "type": "markdown",
+      "description": "README.md model card draft with metadata."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "model-choice-justified",
+      "type": "manual",
+      "description": "Model identity, intended use, license, and compatibility context are documented."
+    },
+    {
+      "id": "dataset-fingerprint-captured",
+      "type": "artifact",
+      "description": "Training or evaluation dataset source, revision, split mapping, and fingerprint are recorded when available."
+    },
+    {
+      "id": "metric-recorded",
+      "type": "metric",
+      "description": "Evaluation metrics include task, dataset or split, value, and source reference."
+    },
+    {
+      "id": "model-card-complete",
+      "type": "artifact",
+      "description": "Model card includes intended use, limitations, datasets, training parameters, and evaluation results."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final card claims cite metric summary, evidence table, dataset metadata, or explicit gaps."
+    }
+  ]
+}

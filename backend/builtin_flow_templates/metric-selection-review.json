@@ -1,0 +1,158 @@
+{
+  "id": "metric-selection-review",
+  "name": "Metric Selection Review",
+  "version": "v1",
+  "description": "Review candidate metrics for an ML task and produce a justified evaluation metric plan without running evaluations.",
+  "inputs": [
+    {
+      "id": "eval_objective",
+      "type": "string",
+      "required": true,
+      "description": "Task, capability, risk, or benchmark target that needs metric selection."
+    },
+    {
+      "id": "candidate_metrics",
+      "type": "array",
+      "required": false,
+      "description": "Optional candidate metrics, measurements, or benchmark scores to compare."
+    },
+    {
+      "id": "dataset_source",
+      "type": "string",
+      "required": false,
+      "description": "Dataset, benchmark, or sample set that the metric plan should account for."
+    }
+  ],
+  "budgets": {
+    "max_gpu_hours": 0.0,
+    "max_runs": 0,
+    "max_wall_clock_hours": 3.0,
+    "max_llm_usd": 5.0
+  },
+  "permissions": [
+    {
+      "id": "read-eval-docs",
+      "risk": "low",
+      "action": "read",
+      "target": "evaluation-docs-dataset-cards-and-papers",
+      "description": "Read public evaluation docs, dataset cards, model cards, papers, and benchmark references."
+    }
+  ],
+  "approval_points": [
+    {
+      "id": "approve-metric-plan",
+      "risk": "low",
+      "action": "approve",
+      "target": "metric-selection-plan",
+      "description": "Confirm the selected metrics, tradeoffs, thresholds, and known blind spots."
+    }
+  ],
+  "phases": [
+    {
+      "id": "objective",
+      "name": "Objective",
+      "objective": "Define the evaluation question, intended users, failure modes, and acceptance criteria.",
+      "status": "pending",
+      "order": 1,
+      "required_outputs": ["metric-review-brief"],
+      "approval_points": [],
+      "verifiers": ["eval-goal-is-testable"]
+    },
+    {
+      "id": "candidate-review",
+      "name": "Candidate Review",
+      "objective": "Compare candidate metrics against task fit, data availability, interpretability, and failure modes.",
+      "status": "pending",
+      "order": 2,
+      "required_outputs": ["candidate-metric-table"],
+      "approval_points": [],
+      "verifiers": ["sources-have-provenance"]
+    },
+    {
+      "id": "metric-spec",
+      "name": "Metric Spec",
+      "objective": "Document selected metrics, aggregation, thresholds, split handling, tie-breakers, and reporting format.",
+      "status": "pending",
+      "order": 3,
+      "required_outputs": ["metric-spec"],
+      "approval_points": ["approve-metric-plan"],
+      "verifiers": ["metric-spec-complete"]
+    },
+    {
+      "id": "risk-review",
+      "name": "Risk Review",
+      "objective": "Identify metric gaming, reliability risks, sample-level debugging needs, and human-review checkpoints.",
+      "status": "pending",
+      "order": 4,
+      "required_outputs": ["metric-risk-report", "verifier-verdict"],
+      "approval_points": [],
+      "verifiers": ["reliability-checked", "final-claims-have-evidence"]
+    }
+  ],
+  "required_outputs": [
+    {
+      "id": "metric-review-brief",
+      "type": "markdown",
+      "description": "Evaluation objective, users, failure modes, and acceptance criteria."
+    },
+    {
+      "id": "candidate-metric-table",
+      "type": "table",
+      "description": "Candidate metrics with sources, assumptions, strengths, and weaknesses."
+    },
+    {
+      "id": "metric-spec",
+      "type": "markdown",
+      "description": "Selected metrics, aggregation, thresholds, split handling, and reporting format."
+    },
+    {
+      "id": "metric-risk-report",
+      "type": "markdown",
+      "description": "Reliability, gaming, interpretation, and debugging risks."
+    },
+    {
+      "id": "verifier-verdict",
+      "type": "verdict",
+      "description": "Evidence-backed verifier result."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "metric-decision-record",
+      "type": "markdown",
+      "description": "Decision record for chosen and rejected metrics."
+    },
+    {
+      "id": "metric-source-table",
+      "type": "table",
+      "description": "Metric references, benchmark docs, papers, and card links."
+    }
+  ],
+  "verifiers": [
+    {
+      "id": "eval-goal-is-testable",
+      "type": "manual",
+      "description": "Evaluation objective maps to observable examples, comparisons, and metrics."
+    },
+    {
+      "id": "sources-have-provenance",
+      "type": "artifact",
+      "description": "Metric choices and benchmark assumptions include source links and source types."
+    },
+    {
+      "id": "metric-spec-complete",
+      "type": "artifact",
+      "description": "Metrics, comparisons, measurements, aggregation, and thresholds are documented."
+    },
+    {
+      "id": "reliability-checked",
+      "type": "manual",
+      "description": "Reliability risks, metric failure modes, and sample-level debugging needs were reviewed."
+    },
+    {
+      "id": "final-claims-have-evidence",
+      "type": "llm",
+      "description": "Final recommendation cites metric sources, tradeoff analysis, and risk notes."
+    }
+  ]
+}

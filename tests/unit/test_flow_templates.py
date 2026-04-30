@@ -22,9 +22,13 @@ BUILTIN_DIR = Path(__file__).resolve().parent.parent.parent / "backend" / "built
 EXPECTED_BUILTIN_IDS = [
     "build-evaluation-harness",
     "dataset-audit",
+    "dataset-card-review",
     "fine-tune-model",
     "implement-architecture",
     "literature-overview",
+    "metric-selection-review",
+    "model-card-refresh",
+    "paper-to-implementation-plan",
     "reproduce-paper",
 ]
 
