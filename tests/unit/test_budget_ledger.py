@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +14,7 @@ from backend.budget_ledger import (
     BudgetLedgerError,
     BudgetLimitRecord,
     BudgetUsageRecord,
+    SQLiteBudgetLedgerStore,
     budget_limit_record_from_event,
     budget_limit_recorded_payload,
     budget_usage_record_from_event,
@@ -286,3 +288,163 @@ def test_budget_usage_projection_is_ordered_filtered_and_duplicate_checked():
             "session-a",
             [_make_usage_event(first, sequence=1), _make_usage_event(first, sequence=2)],
         )
+
+
+def test_sqlite_store_appends_lists_redacts_and_rejects_duplicate_rows(tmp_path):
+    database_path = tmp_path / "budget-ledger.sqlite"
+    store = SQLiteBudgetLedgerStore(database_path)
+    secret = "hf_budgetsecret123456789"
+    first_limit = BudgetLimitRecord.model_validate(
+        _valid_limit_payload(
+            limit_id="limit-store",
+            source_event_sequence=10,
+            metadata={
+                "api_key": secret,
+                "note": f"Authorization: Bearer {secret}",
+            },
+            redaction_status="none",
+        )
+    )
+    limit_update = BudgetLimitRecord.model_validate(
+        _valid_limit_payload(
+            limit_id="limit-store",
+            source_event_sequence=11,
+            limit=30.0,
+            metadata={"reason": "raised"},
+        )
+    )
+    other_session_limit = BudgetLimitRecord.model_validate(
+        _valid_limit_payload(
+            session_id="session-b",
+            scope_id="session-b",
+            limit_id="limit-other",
+            source_event_sequence=12,
+        )
+    )
+    first_usage = BudgetUsageRecord.model_validate(
+        _valid_usage_payload(
+            usage_id="usage-store",
+            source_event_sequence=20,
+            metadata={"token": secret},
+            redaction_status="none",
+        )
+    )
+    usage_update = BudgetUsageRecord.model_validate(
+        _valid_usage_payload(
+            usage_id="usage-store",
+            source_event_sequence=21,
+            amount=0.75,
+            metadata={"hardware": "gpu"},
+        )
+    )
+    other_session_usage = BudgetUsageRecord.model_validate(
+        _valid_usage_payload(
+            session_id="session-b",
+            usage_id="usage-other",
+            source_event_sequence=22,
+            scope="session",
+            scope_id="session-b",
+        )
+    )
+
+    created_limit = store.append_limit(first_limit)
+    store.append_limit(limit_update)
+    store.append_limit(other_session_limit)
+    created_usage = store.append_usage(first_usage)
+    store.append_usage(usage_update)
+    store.append_usage(other_session_usage)
+
+    assert created_limit.redaction_status == "redacted"
+    assert created_limit.metadata["api_key"] == "[REDACTED]"
+    assert secret not in str(created_limit.model_dump())
+    assert created_usage.redaction_status == "redacted"
+    assert created_usage.metadata["token"] == "[REDACTED]"
+    assert secret not in str(created_usage.model_dump())
+
+    assert [
+        (record.limit_id, record.source_event_sequence, record.limit)
+        for record in store.list_limits("session-a")
+    ] == [
+        ("limit-store", 10, 25.0),
+        ("limit-store", 11, 30.0),
+    ]
+    assert store.list_limits("session-a", limit=1) == [created_limit]
+    assert [record.limit_id for record in store.list_limits("session-b")] == [
+        "limit-other"
+    ]
+    assert [
+        (record.usage_id, record.source_event_sequence, record.amount)
+        for record in store.list_usage("session-a")
+    ] == [
+        ("usage-store", 20, 0.5),
+        ("usage-store", 21, 0.75),
+    ]
+    assert store.list_usage("session-a", limit=1) == [created_usage]
+    assert [record.usage_id for record in store.list_usage("session-b")] == [
+        "usage-other"
+    ]
+
+    with pytest.raises(BudgetLedgerError, match="already exists"):
+        store.append_limit(first_limit)
+    with pytest.raises(BudgetLedgerError, match="already exists"):
+        store.append_usage(first_usage)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        database_dump = "\n".join(connection.iterdump())
+    finally:
+        connection.close()
+
+    assert secret not in database_dump
+    assert "[REDACTED]" in database_dump
+
+
+def test_sqlite_store_rejects_duplicate_rows_without_source_event_sequence(tmp_path):
+    store = SQLiteBudgetLedgerStore(tmp_path / "budget-ledger.sqlite")
+    limit = BudgetLimitRecord.model_validate(
+        _valid_limit_payload(
+            limit_id="limit-no-sequence",
+            source_event_sequence=None,
+        )
+    )
+    usage = BudgetUsageRecord.model_validate(
+        _valid_usage_payload(
+            usage_id="usage-no-sequence",
+            source_event_sequence=None,
+        )
+    )
+
+    store.append_limit(limit)
+    store.append_usage(usage)
+
+    with pytest.raises(BudgetLedgerError, match="already exists"):
+        store.append_limit(limit)
+    with pytest.raises(BudgetLedgerError, match="already exists"):
+        store.append_usage(usage)
+
+
+def test_sqlite_store_rejects_negative_limits(tmp_path):
+    store = SQLiteBudgetLedgerStore(tmp_path / "budget-ledger.sqlite")
+
+    with pytest.raises(BudgetLedgerError, match="limit"):
+        store.list_limits("session-a", limit=-1)
+    with pytest.raises(BudgetLedgerError, match="limit"):
+        store.list_usage("session-a", limit=-1)
+
+
+def test_sqlite_store_owns_only_budget_ledger_tables(tmp_path):
+    database_path = tmp_path / "budget-ledger.sqlite"
+    SQLiteBudgetLedgerStore(database_path).close()
+
+    connection = sqlite3.connect(database_path)
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    finally:
+        connection.close()
+
+    assert tables == {"budget_limit_records", "budget_usage_records"}
