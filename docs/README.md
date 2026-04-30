@@ -19,6 +19,22 @@ source of truth.
   read_when: changing component contracts, backend session behavior, agent loop
   contracts, tool policy, event streaming, durable stores, workflow projection,
   or frontend chat transport.
+- [UX_ARCHITECTURE.md](UX_ARCHITECTURE.md):
+  read_when: changing the web UI, project dashboard, workflow projection
+  display, tool/job visibility, evidence surfaces, approvals UI, artifact
+  navigation, or handoff views.
+- [CLI_TUI_SPEC.md](CLI_TUI_SPEC.md):
+  read_when: changing CLI commands, slash-command metadata, command completion,
+  headless mode, local-mode execution, flow preview commands, or future TUI
+  layout.
+- [FLOW_TEMPLATES.md](FLOW_TEMPLATES.md):
+  read_when: changing built-in flow template files, flow preview APIs, CLI flow
+  commands, workflow projection, verifier mappings, phase gates, or flow-related
+  docs.
+- [LONG_RUNNING_PROJECTS.md](LONG_RUNNING_PROJECTS.md):
+  read_when: changing durable events, operation/session stores, workflow
+  projection, checkpoints, handoff summaries, progress detection, stuck
+  detection, job monitoring, or resume semantics.
 - [SECURITY_POLICY.md](SECURITY_POLICY.md):
   read_when: changing credentials, authentication, MCP, local or sandbox
   execution, Hub publishing, HF Jobs, compute spend, redaction, retrieved
