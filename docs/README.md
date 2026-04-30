@@ -15,6 +15,14 @@ source of truth.
 - [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md):
   read_when: changing agent queues, backend sessions, SSE, tools, approvals,
   compaction, local execution, or sandbox execution.
+- [COMPONENT_SPECS.md](COMPONENT_SPECS.md):
+  read_when: changing component contracts, backend session behavior, agent loop
+  contracts, tool policy, event streaming, durable stores, workflow projection,
+  or frontend chat transport.
+- [SECURITY_POLICY.md](SECURITY_POLICY.md):
+  read_when: changing credentials, authentication, MCP, local or sandbox
+  execution, Hub publishing, HF Jobs, compute spend, redaction, retrieved
+  content, or approval policy.
 - [TESTING.md](TESTING.md):
   read_when: adding tests, running the offline Python gate, or deciding whether
   a test may touch the network.
