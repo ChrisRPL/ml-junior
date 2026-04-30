@@ -62,9 +62,87 @@ def test_flow_preview_renders_read_only_template_surfaces() -> None:
     assert "approvals: launch-training" in output
     assert "Approvals\n  launch-training (medium) launch fine-tuning-job" in output
     assert "Verifiers\n  model-choice-justified (manual, required)" in output
+    assert "     catalog: status:intentional_unmapped id:-" in output
+    assert "Verifier catalog coverage\n  mapped:7/8  unmapped:1" in output
     loaded_by_preview = set(sys.modules) - loaded_before
     assert "backend.main" not in loaded_by_preview
     assert "backend.routes.agent" not in loaded_by_preview
+
+
+def test_flow_preview_renders_catalog_mapping_metadata() -> None:
+    output = render_flow_preview("reproduce-paper")
+
+    assert (
+        "catalog: status:mapped  id:metric-parsed-from-output  "
+        "name:Metric parsed from actual output  kind:evaluation/metric  "
+        "evidence:metric, evidence, experiment"
+    ) in output
+    assert "catalog: status:intentional_unmapped id:-" in output
+    assert (
+        "Verifier catalog coverage\n"
+        "  mapped:6/7  unmapped:1  intentional:goal-is-testable  unknown:-"
+    ) in output
+
+
+def test_flow_preview_renders_missing_catalog_metadata_gracefully(
+    monkeypatch,
+) -> None:
+    import agent.core.flow_commands as flow_commands
+
+    class FakeFlowError(Exception):
+        pass
+
+    preview = {
+        "id": "compat-flow",
+        "name": "Compatibility Flow",
+        "version": "v1",
+        "description": None,
+        "metadata": {
+            "category": "compat",
+            "runtime_class": "preview",
+            "tags": [],
+        },
+        "template_source": {"path": "compat.json"},
+        "inputs": [],
+        "budgets": {},
+        "phases": [
+            {
+                "id": "phase-one",
+                "name": "Phase One",
+                "objective": "Keep old preview payloads readable.",
+                "status": "pending",
+                "order": 1,
+                "required_outputs": [],
+                "approval_points": [],
+                "verifiers": ["old-check"],
+            }
+        ],
+        "approval_points": [],
+        "verifier_checks": [
+            {
+                "id": "old-check",
+                "type": "manual",
+                "required": True,
+                "description": "Old payload without catalog fields.",
+                "phase_ids": ["phase-one"],
+            }
+        ],
+    }
+    helpers = flow_commands._FlowHelpers(
+        build_flow_catalog_item=lambda template: {},
+        build_flow_preview=lambda template: preview,
+        flow_template_error=FakeFlowError,
+        flow_template_not_found_error=FakeFlowError,
+        get_builtin_flow_template=lambda template_id: object(),
+        list_builtin_flow_templates=lambda: [],
+    )
+
+    monkeypatch.setattr(flow_commands, "_load_flow_helpers", lambda: helpers)
+
+    output = render_flow_preview("compat-flow")
+
+    assert "catalog: metadata unavailable" in output
+    assert "Verifier catalog coverage\n  metadata unavailable" in output
 
 
 def test_flow_preview_requires_id_and_reports_known_missing_ids() -> None:

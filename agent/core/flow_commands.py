@@ -116,6 +116,11 @@ def render_flow_preview(template_id: str) -> str:
     lines.extend(["", "Verifiers"])
     lines.extend(_format_verifiers(preview["verifier_checks"]))
 
+    lines.extend(["", "Verifier catalog coverage"])
+    lines.extend(
+        _format_verifier_catalog_coverage(preview.get("verifier_catalog_coverage"))
+    )
+
     return "\n".join(lines)
 
 
@@ -239,13 +244,76 @@ def _format_verifiers(verifiers: list[dict[str, Any]]) -> list[str]:
         return ["  -"]
     lines: list[str] = []
     for verifier in verifiers:
-        required = "required" if verifier["required"] else "optional"
+        required = "required" if verifier.get("required") else "optional"
         lines.append(
-            f"  {verifier['id']} ({verifier['type']}, {required}) "
+            f"  {verifier.get('id', '-')} ({verifier.get('type', '-')}, {required}) "
             f"phases:{_format_id_list(verifier.get('phase_ids', []))} - "
-            f"{verifier['description']}"
+            f"{verifier.get('description') or '-'}"
         )
+        lines.append(f"     catalog: {_format_verifier_catalog_mapping(verifier)}")
     return lines
+
+
+def _format_verifier_catalog_mapping(verifier: dict[str, Any]) -> str:
+    status = verifier.get("mapping_status")
+    if not status:
+        return "metadata unavailable"
+
+    catalog_check_id = verifier.get("catalog_check_id")
+    if not catalog_check_id:
+        return f"status:{status} id:-"
+
+    parts = [
+        f"status:{status}",
+        f"id:{catalog_check_id}",
+    ]
+    name = verifier.get("catalog_check_name")
+    if name:
+        parts.append(f"name:{name}")
+    category = verifier.get("catalog_check_category")
+    check_type = verifier.get("catalog_check_type")
+    if category or check_type:
+        parts.append(
+            "kind:"
+            + "/".join(
+                item
+                for item in [
+                    _format_optional_value(category),
+                    _format_optional_value(check_type),
+                ]
+                if item != "-"
+            )
+        )
+    evidence_ref_types = verifier.get("catalog_evidence_ref_types")
+    if isinstance(evidence_ref_types, list):
+        parts.append(f"evidence:{_format_id_list(evidence_ref_types)}")
+    return "  ".join(parts)
+
+
+def _format_verifier_catalog_coverage(coverage: dict[str, Any] | None) -> list[str]:
+    if not coverage:
+        return ["  metadata unavailable"]
+
+    verifier_count = _format_optional_value(coverage.get("verifier_count"))
+    mapped_count = _format_optional_value(coverage.get("mapped_count"))
+    unmapped_count = _format_optional_value(coverage.get("unmapped_count"))
+    intentional_ids = coverage.get("intentional_unmapped_verifier_ids")
+    unknown_ids = coverage.get("unknown_unmapped_verifier_ids")
+    return [
+        (
+            "  "
+            f"mapped:{mapped_count}/{verifier_count}  "
+            f"unmapped:{unmapped_count}  "
+            f"intentional:{_format_id_list(_list_or_empty(intentional_ids))}  "
+            f"unknown:{_format_id_list(_list_or_empty(unknown_ids))}"
+        )
+    ]
+
+
+def _list_or_empty(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
 
 
 def _format_id_list(ids: list[str]) -> str:
@@ -262,3 +330,9 @@ def _format_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def _format_optional_value(value: Any) -> str:
+    if value is None:
+        return "-"
+    return _format_value(value)
