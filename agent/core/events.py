@@ -428,6 +428,66 @@ class ArtifactRefRecordedPayload(ExperimentLedgerPayload):
     created_at: NonEmptyStr | None = None
 
 
+class EvidenceLedgerPayload(StrictEventPayload):
+    """Closed-schema base for inert evidence ledger event payloads."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class EvidenceItemRecordedPayload(EvidenceLedgerPayload):
+    session_id: NonEmptyStr
+    evidence_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    kind: Literal[
+        "metric",
+        "artifact",
+        "log",
+        "dataset_snapshot",
+        "code_snapshot",
+        "experiment_run",
+        "manual",
+        "external_ref",
+    ]
+    source: Literal[
+        "metric",
+        "artifact_ref",
+        "log_ref",
+        "dataset_snapshot",
+        "code_snapshot",
+        "experiment_run",
+        "manual",
+        "event_ref",
+        "external_ref",
+    ]
+    title: NonEmptyStr | None = None
+    summary: NonEmptyStr | None = None
+    metric_id: NonEmptyStr | None = None
+    artifact_id: NonEmptyStr | None = None
+    log_id: NonEmptyStr | None = None
+    dataset_snapshot_id: NonEmptyStr | None = None
+    code_snapshot_id: NonEmptyStr | None = None
+    run_id: NonEmptyStr | None = None
+    event_id: NonEmptyStr | None = None
+    uri: NonEmptyStr | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    privacy_class: Literal["public", "private", "sensitive", "unknown"]
+    redaction_status: Literal["none", "partial", "redacted"]
+    created_at: NonEmptyStr | None = None
+
+
+class EvidenceClaimLinkRecordedPayload(EvidenceLedgerPayload):
+    session_id: NonEmptyStr
+    link_id: NonEmptyStr
+    claim_id: NonEmptyStr
+    evidence_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    relation: Literal["supports", "contradicts", "qualifies", "context"]
+    strength: Literal["weak", "moderate", "strong", "decisive"] | None = None
+    rationale: NonEmptyStr | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: NonEmptyStr | None = None
+
+
 EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
     "ready": MessagePayload,
     "processing": MessagePayload,
@@ -456,6 +516,8 @@ EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
     "experiment.run_recorded": ExperimentRunRecordedPayload,
     "active_job.recorded": ActiveJobRecordedPayload,
     "artifact_ref.recorded": ArtifactRefRecordedPayload,
+    "evidence_item.recorded": EvidenceItemRecordedPayload,
+    "evidence_claim_link.recorded": EvidenceClaimLinkRecordedPayload,
 }
 
 

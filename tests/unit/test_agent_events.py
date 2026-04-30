@@ -501,6 +501,38 @@ def _valid_log_ref_recorded_payload() -> dict:
     }
 
 
+def _valid_evidence_item_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "evidence_id": " evidence-1 ",
+        "source_event_sequence": 12,
+        "kind": "metric",
+        "source": "metric",
+        "title": " Validation accuracy ",
+        "summary": " Accuracy improved over baseline ",
+        "metric_id": " metric-1 ",
+        "metadata": {"split": "validation"},
+        "privacy_class": "private",
+        "redaction_status": "none",
+        "created_at": " 2026-04-29T10:07:00Z ",
+    }
+
+
+def _valid_evidence_claim_link_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "link_id": " evidence-link-1 ",
+        "claim_id": " claim-1 ",
+        "evidence_id": " evidence-1 ",
+        "source_event_sequence": 13,
+        "relation": "supports",
+        "strength": "strong",
+        "rationale": " Metric exceeds baseline. ",
+        "metadata": {"reviewed_by": "synthetic-fixture"},
+        "created_at": " 2026-04-29T10:08:00Z ",
+    }
+
+
 def test_dataset_snapshot_recorded_payload_validates_and_normalizes():
     event = AgentEvent(
         session_id="session-a",
@@ -741,6 +773,162 @@ def test_log_ref_recorded_payload_validates_and_normalizes():
     assert event.data["log_id"] == "log-1"
     assert event.data["uri"] == "file:///tmp/train.log"
     assert event.data["label"] == "Training log"
+
+
+def test_evidence_item_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=16,
+        event_type="evidence_item.recorded",
+        data=_valid_evidence_item_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["evidence_id"] == "evidence-1"
+    assert event.data["title"] == "Validation accuracy"
+    assert event.data["summary"] == "Accuracy improved over baseline"
+    assert event.data["metric_id"] == "metric-1"
+
+
+def test_evidence_claim_link_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=17,
+        event_type="evidence_claim_link.recorded",
+        data=_valid_evidence_claim_link_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["link_id"] == "evidence-link-1"
+    assert event.data["claim_id"] == "claim-1"
+    assert event.data["evidence_id"] == "evidence-1"
+    assert event.data["rationale"] == "Metric exceeds baseline."
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory"),
+    [
+        ("evidence_item.recorded", _valid_evidence_item_recorded_payload),
+        (
+            "evidence_claim_link.recorded",
+            _valid_evidence_claim_link_recorded_payload,
+        ),
+    ],
+)
+def test_evidence_payloads_reject_unknown_top_level_fields(
+    event_type,
+    payload_factory,
+):
+    payload = payload_factory()
+    payload["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=18,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "path"),
+    [
+        (
+            "evidence_item.recorded",
+            _valid_evidence_item_recorded_payload,
+            ("session_id",),
+        ),
+        (
+            "evidence_item.recorded",
+            _valid_evidence_item_recorded_payload,
+            ("evidence_id",),
+        ),
+        ("evidence_item.recorded", _valid_evidence_item_recorded_payload, ("title",)),
+        (
+            "evidence_claim_link.recorded",
+            _valid_evidence_claim_link_recorded_payload,
+            ("link_id",),
+        ),
+        (
+            "evidence_claim_link.recorded",
+            _valid_evidence_claim_link_recorded_payload,
+            ("claim_id",),
+        ),
+        (
+            "evidence_claim_link.recorded",
+            _valid_evidence_claim_link_recorded_payload,
+            ("evidence_id",),
+        ),
+    ],
+)
+def test_evidence_payloads_reject_empty_required_ids_and_text(
+    event_type,
+    payload_factory,
+    path,
+):
+    payload = payload_factory()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = ""
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=18,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "field", "value"),
+    [
+        (
+            "evidence_item.recorded",
+            _valid_evidence_item_recorded_payload,
+            "kind",
+            "score",
+        ),
+        (
+            "evidence_item.recorded",
+            _valid_evidence_item_recorded_payload,
+            "source_event_sequence",
+            0,
+        ),
+        (
+            "evidence_claim_link.recorded",
+            _valid_evidence_claim_link_recorded_payload,
+            "relation",
+            "proves",
+        ),
+        (
+            "evidence_claim_link.recorded",
+            _valid_evidence_claim_link_recorded_payload,
+            "strength",
+            "absolute",
+        ),
+    ],
+)
+def test_evidence_payloads_reject_invalid_values(
+    event_type,
+    payload_factory,
+    field,
+    value,
+):
+    payload = payload_factory()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=18,
+            event_type=event_type,
+            data=payload,
+        )
 
 
 @pytest.mark.parametrize(
