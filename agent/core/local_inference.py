@@ -1,15 +1,37 @@
-"""Pure endpoint resolution for local OpenAI-compatible inference."""
+"""Pure descriptors and endpoint resolution for local inference runtimes."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import ipaddress
 import os
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
 
 class LocalInferenceConfigError(ValueError):
     """Invalid local inference endpoint configuration."""
+
+
+@dataclass(frozen=True)
+class LocalInferenceRuntimeCapabilities:
+    chat_completions: str = "unknown"
+    streaming: str = "unknown"
+    tool_calling: str = "unknown"
+    structured_outputs: str = "unknown"
+    vision: str = "unknown"
+    embeddings: str = "unknown"
+    reasoning_effort: str = "unknown"
+
+
+@dataclass(frozen=True)
+class LocalInferenceRuntimeDescriptor:
+    runtime_id: str
+    env_vars: tuple[str, ...]
+    default_base_url: str | None
+    resolved_base_url: str | None
+    configuration_error: str | None
+    capabilities: LocalInferenceRuntimeCapabilities
 
 
 _LOCAL_DEFAULT_BASE_URLS = {
@@ -55,29 +77,75 @@ _TRUSTED_IPV6_NETWORKS = tuple(
 
 def resolve_local_inference_base_url(runtime: str, config: Any = None) -> str:
     """Resolve and validate the OpenAI-compatible ``/v1`` base URL."""
+    descriptor = describe_local_inference_runtime(runtime, config)
+    if descriptor.configuration_error:
+        raise LocalInferenceConfigError(descriptor.configuration_error)
+    assert descriptor.resolved_base_url is not None
+    return descriptor.resolved_base_url
+
+
+def describe_local_inference_runtime(
+    runtime: str,
+    config: Any = None,
+    env: Mapping[str, str] | None = None,
+) -> LocalInferenceRuntimeDescriptor:
+    """Describe a local runtime without probing providers or daemons."""
     if runtime not in _LOCAL_DEFAULT_BASE_URLS:
         allowed = ", ".join(sorted(_LOCAL_DEFAULT_BASE_URLS))
-        raise LocalInferenceConfigError(
-            f"Unsupported local inference runtime {runtime!r}; expected one of: {allowed}"
+        return LocalInferenceRuntimeDescriptor(
+            runtime_id=runtime,
+            env_vars=(),
+            default_base_url=None,
+            resolved_base_url=None,
+            configuration_error=(
+                f"Unsupported local inference runtime {runtime!r}; "
+                f"expected one of: {allowed}"
+            ),
+            capabilities=LocalInferenceRuntimeCapabilities(),
         )
 
-    raw = _base_url_from_env(runtime)
-    if raw is None:
-        raw = _base_url_from_config(runtime, config)
-    if raw is None:
-        raw = _LOCAL_DEFAULT_BASE_URLS[runtime]
+    env_map = os.environ if env is None else env
+    resolved_base_url = None
+    configuration_error = None
+    try:
+        raw = _base_url_from_env(runtime, env_map)
+        if raw is None:
+            raw = _base_url_from_config(runtime, config)
+        if raw is None:
+            raw = _LOCAL_DEFAULT_BASE_URLS[runtime]
+        resolved_base_url = _validate_and_normalize_base_url(runtime, raw)
+    except LocalInferenceConfigError as exc:
+        configuration_error = str(exc)
 
-    return _validate_and_normalize_base_url(runtime, raw)
+    return LocalInferenceRuntimeDescriptor(
+        runtime_id=runtime,
+        env_vars=_LOCAL_ENV_NAMES[runtime],
+        default_base_url=_LOCAL_DEFAULT_BASE_URLS[runtime],
+        resolved_base_url=resolved_base_url,
+        configuration_error=configuration_error,
+        capabilities=LocalInferenceRuntimeCapabilities(),
+    )
+
+
+def list_local_inference_runtime_descriptors(
+    config: Any = None,
+    env: Mapping[str, str] | None = None,
+) -> tuple[LocalInferenceRuntimeDescriptor, ...]:
+    """Return descriptors for supported local runtimes in stable order."""
+    return tuple(
+        describe_local_inference_runtime(runtime, config=config, env=env)
+        for runtime in _LOCAL_DEFAULT_BASE_URLS
+    )
 
 
 def supported_local_runtimes() -> frozenset[str]:
     return frozenset(_LOCAL_DEFAULT_BASE_URLS)
 
 
-def _base_url_from_env(runtime: str) -> str | None:
+def _base_url_from_env(runtime: str, env: Mapping[str, str]) -> str | None:
     for name in _LOCAL_ENV_NAMES[runtime]:
-        if name in os.environ:
-            return os.environ[name]
+        if name in env:
+            return env[name]
     return None
 
 
