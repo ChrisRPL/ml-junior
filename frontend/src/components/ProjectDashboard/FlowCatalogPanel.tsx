@@ -9,14 +9,17 @@ import {
 } from '@mui/material';
 import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ListAltOutlinedIcon from '@mui/icons-material/ListAltOutlined';
+import SourceOutlinedIcon from '@mui/icons-material/SourceOutlined';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import {
   fetchFlowCatalog,
   fetchFlowPreview,
+  fetchFlowSources,
   type FlowCatalogItem,
   type FlowPreviewApiFailureResult,
   type FlowPreviewResponse,
+  type FlowTemplateSourceDescriptor,
 } from '@/lib/flow-preview-api';
 import { apiFetch } from '@/utils/api';
 import {
@@ -36,6 +39,12 @@ type CatalogState =
   | { kind: 'empty' }
   | { kind: 'error'; failure: FlowPreviewApiFailureResult };
 
+type FlowSourcesState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; sources: FlowTemplateSourceDescriptor[] }
+  | { kind: 'empty' }
+  | { kind: 'error'; failure: FlowPreviewApiFailureResult };
+
 type PreviewState =
   | { kind: 'idle' }
   | { kind: 'loading' }
@@ -44,14 +53,19 @@ type PreviewState =
 
 export default function FlowCatalogPanel() {
   const [catalogState, setCatalogState] = useState<CatalogState>({ kind: 'loading' });
+  const [sourceState, setSourceState] = useState<FlowSourcesState>({ kind: 'loading' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<PreviewState>({ kind: 'idle' });
 
   useEffect(() => {
     let cancelled = false;
     setCatalogState({ kind: 'loading' });
+    setSourceState({ kind: 'loading' });
 
-    fetchFlowCatalog(apiFetch).then((result) => {
+    const catalogRequest = fetchFlowCatalog(apiFetch);
+    const sourceRequest = fetchFlowSources(apiFetch);
+
+    catalogRequest.then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         setSelectedId(null);
@@ -69,6 +83,15 @@ export default function FlowCatalogPanel() {
       setSelectedId((current) => (
         current && result.catalog.some((item) => item.id === current) ? current : null
       ));
+    });
+
+    sourceRequest.then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setSourceState({ kind: 'error', failure: result });
+        return;
+      }
+      setSourceState(result.sources.length > 0 ? { kind: 'ready', sources: result.sources } : { kind: 'empty' });
     });
 
     return () => {
@@ -96,6 +119,7 @@ export default function FlowCatalogPanel() {
 
   const catalogItems = catalogState.kind === 'ready' ? catalogState.items : [];
   const selectedItem = catalogItems.find((item) => item.id === selectedId) ?? null;
+  const flowSources = sourceState.kind === 'ready' ? sourceState.sources : [];
 
   return (
     <Box sx={panelSx}>
@@ -113,12 +137,14 @@ export default function FlowCatalogPanel() {
         </Stack>
       </Box>
 
+      <FlowSourceStatusPanel state={sourceState} />
+
       {catalogState.kind === 'loading' && <PanelState title="Loading flow catalog" detail="Fetching /api/flows." loading />}
       {catalogState.kind === 'empty' && <PanelState title="No flows available" detail="The backend returned an empty flow catalog." />}
       {catalogState.kind === 'error' && <FailureState failure={catalogState.failure} endpoint="/api/flows" />}
       {catalogState.kind === 'ready' && (
         <Box sx={catalogLayoutSx}>
-          <CatalogList items={catalogState.items} selectedId={selectedId} onSelect={setSelectedId} />
+          <CatalogList items={catalogState.items} selectedId={selectedId} sources={flowSources} onSelect={setSelectedId} />
           <PreviewPane state={previewState} selectedItem={selectedItem} />
         </Box>
       )}
@@ -129,10 +155,12 @@ export default function FlowCatalogPanel() {
 function CatalogList({
   items,
   selectedId,
+  sources,
   onSelect,
 }: {
   items: FlowCatalogItem[];
   selectedId: string | null;
+  sources: FlowTemplateSourceDescriptor[];
   onSelect: (id: string) => void;
 }) {
   return (
@@ -141,6 +169,7 @@ function CatalogList({
       <Box sx={{ borderTop: '1px solid var(--border)' }}>
         {items.map((item) => {
           const selected = item.id === selectedId;
+          const source = sources.find((candidate) => candidate.kind === item.template_source.kind);
           return (
             <Box
               key={item.id}
@@ -169,7 +198,15 @@ function CatalogList({
                   <Typography variant="body2" sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}>{item.name}</Typography>
                   <Typography variant="caption" sx={monoLineSx}>{item.id}</Typography>
                 </Box>
-                <FlowChip label={item.metadata.category} tone="amber" />
+                <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', justifyContent: 'flex-end', rowGap: 0.75 }}>
+                  <FlowChip label={item.metadata.category} tone="amber" />
+                  {source && (
+                    <FlowChip
+                      label={`${source.label} ${source.loading_status}`}
+                      tone={source.loading_status === 'enabled' ? 'good' : 'muted'}
+                    />
+                  )}
+                </Stack>
               </Box>
               {item.description && (
                 <Typography variant="body2" sx={{ color: 'var(--muted-text)', mt: 0.75, overflowWrap: 'anywhere' }}>
@@ -186,6 +223,75 @@ function CatalogList({
           );
         })}
       </Box>
+    </Box>
+  );
+}
+
+function FlowSourceStatusPanel({ state }: { state: FlowSourcesState }) {
+  const meta = state.kind === 'ready' ? `${state.sources.length} sources` : 'source metadata';
+
+  return (
+    <Box sx={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', py: 1.25, mb: 1.5 }}>
+      <SectionHeading icon={<SourceOutlinedIcon />} title="Template sources" meta={meta} />
+      <Box sx={{ mt: 1 }}>
+        {state.kind === 'loading' && (
+          <InlineState title="Loading source metadata" detail="Fetching /api/flow-sources." loading />
+        )}
+        {state.kind === 'empty' && (
+          <InlineState title="No flow sources available" detail="The backend returned an empty flow source list." />
+        )}
+        {state.kind === 'error' && <FailureState failure={state.failure} endpoint="/api/flow-sources" />}
+        {state.kind === 'ready' && <FlowSourceRows sources={state.sources} />}
+      </Box>
+    </Box>
+  );
+}
+
+function FlowSourceRows({ sources }: { sources: FlowTemplateSourceDescriptor[] }) {
+  return (
+    <Box sx={{ borderTop: '1px solid var(--border)' }}>
+      {sources.map((source) => (
+        <Box
+          key={source.kind}
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: 'minmax(150px, 0.42fr) minmax(0, 1fr)' },
+            gap: { xs: 0.75, md: 1.25 },
+            py: 0.9,
+            borderBottom: '1px solid var(--border)',
+          }}
+        >
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="body2" sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}>{source.label}</Typography>
+            <Typography variant="caption" sx={monoLineSx}>
+              {source.kind}{source.source_path ? ` / ${source.source_path}` : ' / no source path'}
+            </Typography>
+          </Box>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="body2" sx={{ color: 'var(--muted-text)', overflowWrap: 'anywhere' }}>
+              {source.description}
+            </Typography>
+            <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', rowGap: 0.75, mt: 0.75 }}>
+              <FlowChip
+                label={source.availability}
+                tone={source.availability === 'available' ? 'good' : 'muted'}
+              />
+              <FlowChip
+                label={source.loading_status}
+                tone={source.loading_status === 'enabled' ? 'good' : 'muted'}
+              />
+              <FlowChip
+                label={source.trust_status}
+                tone={source.trust_status === 'trusted' ? 'good' : 'amber'}
+              />
+              <FlowChip label={`${source.template_count} templates`} tone={source.template_count > 0 ? 'blue' : 'muted'} />
+              {source.read_only && <FlowChip label="read only" tone="good" />}
+              {!source.supports_upload && <FlowChip label="upload disabled" tone="muted" />}
+              {!source.supports_remote_fetch && <FlowChip label="remote fetch disabled" tone="muted" />}
+            </Stack>
+          </Box>
+        </Box>
+      ))}
     </Box>
   );
 }
@@ -225,6 +331,16 @@ function PanelState({ title, detail, loading = false }: { title: string; detail:
       {loading && <CircularProgress size={22} color="inherit" />}
       <Typography variant="subtitle2" sx={{ color: 'var(--text)', fontWeight: 700 }}>{title}</Typography>
       <Typography variant="body2" sx={{ maxWidth: 460 }}>{detail}</Typography>
+    </Box>
+  );
+}
+
+function InlineState({ title, detail, loading = false }: { title: string; detail: string; loading?: boolean }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'var(--muted-text)', flexWrap: 'wrap' }}>
+      {loading && <CircularProgress size={16} color="inherit" />}
+      <Typography variant="body2" sx={{ color: 'var(--text)', fontWeight: 700 }}>{title}</Typography>
+      <Typography variant="body2">{detail}</Typography>
     </Box>
   );
 }

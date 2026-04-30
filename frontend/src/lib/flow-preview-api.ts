@@ -10,8 +10,27 @@ export interface FlowTemplateMetadata {
   runtime_class: string;
 }
 
+export type FlowTemplateSourceKind = 'builtin' | 'custom' | 'community';
+export type FlowTemplateSourceAvailability = 'available' | 'reserved';
+export type FlowTemplateSourceTrustStatus = 'trusted' | 'untrusted';
+export type FlowTemplateSourceLoadingStatus = 'enabled' | 'disabled';
+
+export interface FlowTemplateSourceDescriptor {
+  kind: FlowTemplateSourceKind;
+  label: string;
+  availability: FlowTemplateSourceAvailability;
+  trust_status: FlowTemplateSourceTrustStatus;
+  loading_status: FlowTemplateSourceLoadingStatus;
+  template_count: number;
+  read_only: boolean;
+  supports_upload: boolean;
+  supports_remote_fetch: boolean;
+  source_path: string | null;
+  description: string;
+}
+
 export interface FlowTemplateSourceMetadata {
-  kind: 'builtin';
+  kind: FlowTemplateSourceKind;
   path: string;
   schema_version: string;
   template_version: string;
@@ -132,6 +151,9 @@ export interface FlowPreviewResponse {
 }
 
 export type FlowPreviewApiWarning =
+  | 'flow_sources_backend_unavailable'
+  | 'flow_sources_http_error'
+  | 'flow_sources_malformed'
   | 'flow_catalog_backend_unavailable'
   | 'flow_catalog_http_error'
   | 'flow_catalog_malformed'
@@ -150,9 +172,36 @@ export type FlowCatalogLoadResult =
   | { ok: true; catalog: FlowCatalogItem[] }
   | FlowPreviewApiFailureResult;
 
+export type FlowSourcesLoadResult =
+  | { ok: true; sources: FlowTemplateSourceDescriptor[] }
+  | FlowPreviewApiFailureResult;
+
 export type FlowPreviewLoadResult =
   | { ok: true; preview: FlowPreviewResponse }
   | FlowPreviewApiFailureResult;
+
+export async function fetchFlowSources(
+  fetcher: FlowPreviewFetch = fetch,
+): Promise<FlowSourcesLoadResult> {
+  let response: Response;
+  try {
+    response = await fetcher('/api/flow-sources');
+  } catch (error) {
+    return { ok: false, warning: 'flow_sources_backend_unavailable', error };
+  }
+
+  if (!response.ok) {
+    return { ok: false, warning: 'flow_sources_http_error', status: response.status };
+  }
+
+  try {
+    const payload = await response.json();
+    const sources = parseFlowSources(payload);
+    return sources ? { ok: true, sources } : { ok: false, warning: 'flow_sources_malformed', status: response.status };
+  } catch (error) {
+    return { ok: false, warning: 'flow_sources_malformed', status: response.status, error };
+  }
+}
 
 export async function fetchFlowCatalog(
   fetcher: FlowPreviewFetch = fetch,
@@ -206,6 +255,13 @@ function parseFlowCatalog(value: unknown): FlowCatalogItem[] | null {
   const items = value.map(parseCatalogItem);
   if (items.some((item) => item === null)) return null;
   return items as FlowCatalogItem[];
+}
+
+function parseFlowSources(value: unknown): FlowTemplateSourceDescriptor[] | null {
+  if (!Array.isArray(value)) return null;
+  const sources = value.map(parseFlowSourceDescriptor);
+  if (sources.some((source) => source === null)) return null;
+  return sources as FlowTemplateSourceDescriptor[];
 }
 
 function parseFlowPreview(value: unknown): FlowPreviewResponse | null {
@@ -312,10 +368,50 @@ function parseMetadata(value: unknown): FlowTemplateMetadata | null {
   return { category: value.category, runtime_class: value.runtime_class, tags };
 }
 
-function parseTemplateSource(value: unknown): FlowTemplateSourceMetadata | null {
+function parseFlowSourceDescriptor(value: unknown): FlowTemplateSourceDescriptor | null {
+  if (!isRecord(value)) return null;
+  const kind = readTemplateSourceKind(value.kind);
+  const availability = readTemplateSourceAvailability(value.availability);
+  const trustStatus = readTemplateSourceTrustStatus(value.trust_status);
+  const loadingStatus = readTemplateSourceLoadingStatus(value.loading_status);
+  const sourcePath = readNullableString(value.source_path);
+
   if (
-    !isRecord(value)
-    || value.kind !== 'builtin'
+    kind === null
+    || typeof value.label !== 'string'
+    || availability === null
+    || trustStatus === null
+    || loadingStatus === null
+    || !isNonNegativeInteger(value.template_count)
+    || typeof value.read_only !== 'boolean'
+    || typeof value.supports_upload !== 'boolean'
+    || typeof value.supports_remote_fetch !== 'boolean'
+    || sourcePath === undefined
+    || typeof value.description !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    kind,
+    label: value.label,
+    availability,
+    trust_status: trustStatus,
+    loading_status: loadingStatus,
+    template_count: value.template_count,
+    read_only: value.read_only,
+    supports_upload: value.supports_upload,
+    supports_remote_fetch: value.supports_remote_fetch,
+    source_path: sourcePath,
+    description: value.description,
+  };
+}
+
+function parseTemplateSource(value: unknown): FlowTemplateSourceMetadata | null {
+  if (!isRecord(value)) return null;
+  const kind = readTemplateSourceKind(value.kind);
+  if (
+    kind === null
     || typeof value.path !== 'string'
     || typeof value.schema_version !== 'string'
     || typeof value.template_version !== 'string'
@@ -323,7 +419,7 @@ function parseTemplateSource(value: unknown): FlowTemplateSourceMetadata | null 
     return null;
   }
   return {
-    kind: value.kind,
+    kind,
     path: value.path,
     schema_version: value.schema_version,
     template_version: value.template_version,
@@ -552,6 +648,26 @@ function readOptionalNullableString(
 function readOptionalMappingStatus(value: unknown): FlowVerifierCheckPreview['mapping_status'] | null | undefined {
   if (value === undefined) return undefined;
   if (value === 'mapped' || value === 'intentional_unmapped' || value === 'unknown_unmapped') return value;
+  return null;
+}
+
+function readTemplateSourceKind(value: unknown): FlowTemplateSourceKind | null {
+  if (value === 'builtin' || value === 'custom' || value === 'community') return value;
+  return null;
+}
+
+function readTemplateSourceAvailability(value: unknown): FlowTemplateSourceAvailability | null {
+  if (value === 'available' || value === 'reserved') return value;
+  return null;
+}
+
+function readTemplateSourceTrustStatus(value: unknown): FlowTemplateSourceTrustStatus | null {
+  if (value === 'trusted' || value === 'untrusted') return value;
+  return null;
+}
+
+function readTemplateSourceLoadingStatus(value: unknown): FlowTemplateSourceLoadingStatus | null {
+  if (value === 'enabled' || value === 'disabled') return value;
   return null;
 }
 

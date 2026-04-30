@@ -1,9 +1,11 @@
 import {
   fetchFlowCatalog,
+  fetchFlowSources,
   fetchFlowPreview,
   type FlowCatalogItem,
   type FlowPreviewFetch,
   type FlowPreviewResponse,
+  type FlowTemplateSourceDescriptor,
 } from './flow-preview-api';
 
 function assert(condition: boolean, message: string): void {
@@ -40,6 +42,48 @@ const catalogItem: FlowCatalogItem = {
   approval_point_count: 1,
   verifier_count: 2,
 };
+
+const flowSources: FlowTemplateSourceDescriptor[] = [
+  {
+    kind: 'builtin',
+    label: 'Built-in',
+    availability: 'available',
+    trust_status: 'trusted',
+    loading_status: 'enabled',
+    template_count: 17,
+    read_only: true,
+    supports_upload: false,
+    supports_remote_fetch: false,
+    source_path: 'backend/builtin_flow_templates',
+    description: 'Bundled templates loaded from the backend package only.',
+  },
+  {
+    kind: 'custom',
+    label: 'Custom',
+    availability: 'reserved',
+    trust_status: 'untrusted',
+    loading_status: 'disabled',
+    template_count: 0,
+    read_only: true,
+    supports_upload: false,
+    supports_remote_fetch: false,
+    source_path: null,
+    description: 'Reserved for user-provided templates; loading is disabled.',
+  },
+  {
+    kind: 'community',
+    label: 'Community',
+    availability: 'reserved',
+    trust_status: 'untrusted',
+    loading_status: 'disabled',
+    template_count: 0,
+    read_only: true,
+    supports_upload: false,
+    supports_remote_fetch: false,
+    source_path: null,
+    description: 'Reserved for curated shared templates; remote fetch is disabled.',
+  },
+];
 
 const preview: FlowPreviewResponse = {
   ...catalogItem,
@@ -139,6 +183,22 @@ async function testCatalogHappyPath(): Promise<void> {
   assert(path === '/api/flows', 'should fetch flow catalog path');
   assert(result.ok, 'catalog should load');
   assert(result.ok && result.catalog[0]?.required_inputs[0] === 'base_model', 'catalog should preserve required inputs');
+}
+
+async function testFlowSourcesHappyPath(): Promise<void> {
+  let path = '';
+  const fetcher: FlowPreviewFetch = async (nextPath) => {
+    path = nextPath;
+    return response(200, flowSources);
+  };
+
+  const result = await fetchFlowSources(fetcher);
+  assert(path === '/api/flow-sources', 'should fetch flow sources path');
+  assert(result.ok, 'flow sources should load');
+  assert(result.ok && result.sources.length === 3, 'flow sources should preserve every descriptor');
+  assert(result.ok && result.sources[0]?.trust_status === 'trusted', 'builtin source should preserve trust status');
+  assert(result.ok && result.sources[1]?.loading_status === 'disabled', 'custom source should preserve loading status');
+  assert(result.ok && result.sources[2]?.source_path === null, 'community source should preserve null source path');
 }
 
 async function testPreviewHappyPath(): Promise<void> {
@@ -273,6 +333,21 @@ async function testMalformedCatalog(): Promise<void> {
   assert(!result.ok && result.warning === 'flow_catalog_malformed', 'malformed catalog warning should be explicit');
 }
 
+async function testMalformedFlowSources(): Promise<void> {
+  const malformedSources: unknown[] = [
+    {
+      ...flowSources[0]!,
+      loading_status: 'pending',
+    },
+    ...flowSources.slice(1),
+  ];
+  const fetcher: FlowPreviewFetch = async () => response(200, malformedSources);
+  const result = await fetchFlowSources(fetcher);
+
+  assert(!result.ok, 'malformed flow sources should fail');
+  assert(!result.ok && result.warning === 'flow_sources_malformed', 'malformed flow sources warning should be explicit');
+}
+
 async function testMalformedOptionalVerifierMetadata(): Promise<void> {
   const malformedPreview = {
     ...preview,
@@ -320,16 +395,18 @@ async function testMissingBackend(): Promise<void> {
 
 async function run(): Promise<void> {
   await testCatalogHappyPath();
+  await testFlowSourcesHappyPath();
   await testPreviewHappyPath();
   await testMappedVerifierMetadata();
   await testIntentionalUnmappedVerifierMetadata();
   await testUnknownUnmappedVerifierMetadata();
   await testMalformedCatalog();
+  await testMalformedFlowSources();
   await testMalformedOptionalVerifierMetadata();
   await testMalformedOptionalCoverageMetadata();
   await testMissingBackend();
 }
 
 run().then(() => {
-  console.log('flow-preview-api: 9 tests passed');
+  console.log('flow-preview-api: 11 tests passed');
 });
