@@ -151,10 +151,11 @@ Current behavior:
 - `yolo_mode` and compatible autonomy/approval modes skip approval while
   preserving risk metadata. `confirm_cpu_jobs` and `auto_file_upload` remain
   policy inputs.
-- A pure HF compute risk helper can classify local HF Jobs flavor metadata into
-  risk tier, spend class, budget-impact text, uncertainty flags, duration
-  source, and approval-metadata visibility. It uses local flavor/price
-  snapshots only and is not wired into `PolicyEngine` yet.
+- `PolicyEngine` consumes the pure HF compute risk helper for HF Jobs approval
+  metadata. Explicit non-scheduled CPU jobs can still skip approval when
+  `confirm_cpu_jobs=false`; scheduled CPU jobs and missing/unknown hardware stay
+  approval-gated. The helper uses local flavor/price snapshots only and does
+  not call HF services.
 
 Current limitations:
 
@@ -275,6 +276,9 @@ Current behavior:
   (`mlj-artifact://session/<session_id>/<artifact_id>`), while storage-specific
   paths and URLs live in typed locator metadata plus compatibility `path`/`uri`
   fields. Existing external `ref_uri` values still validate for compatibility.
+  A pure artifact producer adapter can convert explicit caller-supplied
+  producer metadata into `ArtifactRefRecord` rows with canonical `ref_uri` and
+  typed locators.
   Nothing wires that store to job launch, polling, artifact discovery, routes,
   export behavior, or workflow producers yet.
 - Dataset lineage currently exists as closed, caller-supplied manifest/diff

@@ -207,14 +207,15 @@ Current behavior:
 
 - `hf_jobs` read/status operations do not require approval.
 - `hf_jobs` `run`, `uv`, `scheduled run`, and `scheduled uv` require approval.
-- CPU job approval can be disabled by `confirm_cpu_jobs=false`; GPU jobs still
-  require approval.
+- Explicit non-scheduled CPU job approval can be disabled by
+  `confirm_cpu_jobs=false`; scheduled CPU jobs, GPU jobs, and missing/unknown
+  hardware still require approval.
 - Approval metadata includes risk, side effects, rollback, budget impact,
   credential usage, and reason.
-- A pure local HF compute risk helper can prepare risk/spend metadata from
-  known hardware flavors and user-supplied duration, including uncertainty for
-  scheduled or unknown hardware. It is not yet wired into approval enforcement
-  or budget mutation.
+- HF Jobs approval metadata uses a pure local compute risk helper for known
+  hardware flavors and user-supplied duration, including uncertainty for
+  scheduled or unknown hardware. It does not call HF services or mutate budget
+  state.
 - Running job ids are tracked in session memory and cancel attempts are made on
   interrupt.
 - Claude quota is charged at first Anthropic message submit per session.
