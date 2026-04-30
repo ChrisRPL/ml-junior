@@ -192,7 +192,8 @@ Current behavior:
 Current limits:
 
 - Inert budget limit and usage ledger records can now be validated as
-  `AgentEvent` payloads and projected into workflow state, but no runtime
+  `AgentEvent` payloads, projected into workflow state, and persisted in an
+  append-only redacted SQLite store when supplied explicitly. No runtime
   producer emits them yet.
 - There is still no hard spend cap for HF Jobs, and the budget ledger does not
   enforce, reserve, or consume quota.

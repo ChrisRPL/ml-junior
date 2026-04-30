@@ -261,14 +261,17 @@ Current behavior:
   decision/proof records, budget records, human requests, and verifier verdicts
   project into workflow state when those events exist.
 - Budget projection is read-only. It aggregates recorded budget limit/usage
-  events into totals and ledger rows but does not reserve, spend, or enforce
+  events into totals and ledger rows. An append-only redacted SQLite budget
+  ledger store can persist explicit caller-supplied limit/usage records, but
+  no runtime producer writes to it and it does not reserve, spend, or enforce
   quota.
 - Active job and artifact records also have an inert append-only SQLite store
   for caller-supplied refs. Nothing wires that store to job launch, polling,
   artifact discovery, routes, or workflow producers yet.
 - Dataset lineage currently exists as closed, caller-supplied manifest/diff
-  models only. It does not walk files, write blob caches, call datasets/HF
-  services, or emit runtime events.
+  models, an inert transform/filter/augment/merge lineage DAG schema, and pure
+  sha256 blob digest/path conventions. It does not walk files, read/write blob
+  caches, call datasets/HF services, or emit runtime events.
 - Built-in flow templates live under `backend/builtin_flow_templates/`.
   `GET /api/flows` returns the read-only catalog. `GET
   /api/flows/{template_id}/preview` returns inputs, required inputs, budgets,
@@ -488,7 +491,8 @@ Current behavior:
 - Local inference probe helpers are also pure metadata/classification helpers.
   They build intended `/v1/models` probe descriptors and classify
   caller-supplied payloads or errors; they do not perform network I/O or start
-  local daemons.
+  local daemons. Endpoint resolution and probe logic live in separate helper
+  modules behind the compatibility `agent.core.local_inference` facade.
 - Backend-created sessions use sandbox mode by default. Sandbox mode exposes
   `sandbox_create`, `bash`, `read`, `write`, and `edit` backed by a Hugging Face
   Space sandbox.

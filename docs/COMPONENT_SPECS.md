@@ -215,6 +215,37 @@ Target behavior:
 - Hub publishing should prefer PR-style changes for non-trivial or destructive
   writes, with artifact lineage linked into workflow state.
 
+## Budget, Dataset, And Provenance Helpers
+
+Current behavior:
+
+- Responsibilities: validate and persist explicit budget ledger records; model
+  caller-supplied dataset manifests, diffs, lineage DAGs, and content-addressed
+  blob paths; keep provenance primitives inert until runtime producers exist.
+- Inputs: caller-supplied budget limit/usage records, dataset manifest records,
+  lineage graph records, and sha256 blob digests.
+- Outputs: redacted append-only budget ledger rows, deterministic manifest
+  diffs, validated lineage graphs, and conventional `~/.mlj/blobs/sha256/...`
+  paths.
+- Persistence: the budget ledger has an append-only SQLite store for explicit
+  records. Dataset lineage and blob helpers are pure models/path conventions
+  and perform no filesystem or network I/O.
+- Failure modes: duplicate budget records are rejected by
+  `(session_id, record_id, source_event_sequence)`; invalid lineage graphs
+  reject duplicate/unknown parents and cycles; malformed or weak digests are
+  rejected before path derivation.
+- Tests: `tests/unit/test_budget_ledger.py`,
+  `tests/unit/test_dataset_lineage.py`, and `tests/unit/test_dataset_blobs.py`.
+
+Target behavior:
+
+- Runtime producers should eventually write budget, dataset, lineage, and blob
+  references only after policy, privacy, and local/sandbox guardrails are
+  explicit.
+- Provenance export should start with a local-first manifest plus NDJSON record
+  files before optional PROV-JSONLD, OpenLineage, Parquet/DuckDB, or MLMD
+  adapters.
+
 ## Backend API, SSE, And Events
 
 Current behavior:
