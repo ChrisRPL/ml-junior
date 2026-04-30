@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from agent.core.events import AgentEvent
 from backend.event_store import SQLiteEventStore
+from backend.experiment_ledger import LOG_REF_RECORDED_EVENT, METRIC_RECORDED_EVENT
 from backend.job_artifact_refs import (
     ACTIVE_JOB_RECORDED_EVENT,
     ARTIFACT_REF_RECORDED_EVENT,
@@ -107,6 +108,58 @@ def make_artifact_ref_recorded_event(
             "privacy_class": "private",
             "redaction_status": "none",
             "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        },
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
+def make_metric_recorded_event(
+    *,
+    sequence: int,
+    metric_id: str = "metric-1",
+    name: str = "accuracy",
+    value: float = 0.91,
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    return make_event(
+        sequence=sequence,
+        event_type=METRIC_RECORDED_EVENT,
+        session_id=session_id,
+        data={
+            "session_id": session_id,
+            "metric_id": metric_id,
+            "source_event_sequence": source_event_sequence or sequence,
+            "name": name,
+            "value": value,
+            "source": "tool",
+            "step": 3,
+            "unit": "ratio",
+            "recorded_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        },
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
+def make_log_ref_recorded_event(
+    *,
+    sequence: int,
+    log_id: str = "log-1",
+    label: str = "training log",
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    return make_event(
+        sequence=sequence,
+        event_type=LOG_REF_RECORDED_EVENT,
+        session_id=session_id,
+        data={
+            "session_id": session_id,
+            "log_id": log_id,
+            "source_event_sequence": source_event_sequence or sequence,
+            "source": "stdout",
+            "uri": f"file:///tmp/{log_id}.log",
+            "label": label,
         },
     ).model_copy(update={"id": event_id or f"event-{sequence}"})
 
@@ -304,6 +357,7 @@ def test_artifact_ref_recorded_projects_explicit_refs_into_evidence_summary():
     assert state.evidence_summary["artifact_count"] == 2
     assert state.evidence_summary["claim_count"] == 0
     assert state.evidence_summary["metric_count"] == 0
+    assert state.evidence_summary["log_count"] == 0
     assert [
         (item["artifact_id"], item["label"], item["source"])
         for item in state.evidence_summary["items"]
@@ -311,6 +365,42 @@ def test_artifact_ref_recorded_projects_explicit_refs_into_evidence_summary():
         ("artifact-1", "Initial checkpoint", "job"),
         ("artifact-2", "Metrics", "job"),
     ]
+
+
+def test_metric_and_log_ref_recorded_project_into_evidence_summary():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_metric_recorded_event(
+                sequence=1,
+                metric_id="metric-accuracy",
+                name="accuracy",
+                value=0.93,
+            ),
+            make_log_ref_recorded_event(
+                sequence=2,
+                log_id="log-train",
+                label="train stdout",
+            ),
+            make_artifact_ref_recorded_event(
+                sequence=3,
+                artifact_id="artifact-model",
+                label="Model checkpoint",
+            ),
+        ],
+    )
+
+    assert state.evidence_summary["source"] == "event"
+    assert state.evidence_summary["status"] == "available"
+    assert state.evidence_summary["artifact_count"] == 1
+    assert state.evidence_summary["metric_count"] == 1
+    assert state.evidence_summary["log_count"] == 1
+    assert [
+        item.get("metric_id") or item.get("log_id") or item.get("artifact_id")
+        for item in state.evidence_summary["items"]
+    ] == ["metric-accuracy", "log-train", "artifact-model"]
+    assert state.evidence_summary["items"][0]["name"] == "accuracy"
+    assert state.evidence_summary["items"][1]["label"] == "train stdout"
 
 
 def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
@@ -327,6 +417,16 @@ def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
                 artifact_id="artifact-b",
                 session_id="session-b",
             ),
+            make_metric_recorded_event(
+                sequence=3,
+                metric_id="metric-b",
+                session_id="session-b",
+            ),
+            make_log_ref_recorded_event(
+                sequence=4,
+                log_id="log-b",
+                session_id="session-b",
+            ),
         ],
     )
 
@@ -337,6 +437,7 @@ def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
         "claim_count": 0,
         "artifact_count": 0,
         "metric_count": 0,
+        "log_count": 0,
         "items": [],
     }
     assert state.compatibility.stale is True
@@ -363,6 +464,8 @@ def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic()
         artifact_id="artifact-1",
         label="Final checkpoint",
     )
+    metric = make_metric_recorded_event(sequence=5, metric_id="metric-1")
+    log_ref = make_log_ref_recorded_event(sequence=6, log_id="log-1")
 
     state = build_workflow_state(
         session_id="session-a",
@@ -373,6 +476,10 @@ def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic()
             latest_artifact,
             latest_job.model_copy(),
             latest_artifact.model_copy(),
+            metric,
+            metric.model_copy(),
+            log_ref,
+            log_ref.model_copy(),
         ],
     )
 
@@ -380,7 +487,12 @@ def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic()
     assert state.active_jobs[0]["job_id"] == "active-job-1"
     assert state.active_jobs[0]["status"] == "running"
     assert state.evidence_summary["artifact_count"] == 1
-    assert state.evidence_summary["items"][0]["artifact_id"] == "artifact-1"
+    assert state.evidence_summary["metric_count"] == 1
+    assert state.evidence_summary["log_count"] == 1
+    assert [
+        item.get("artifact_id") or item.get("metric_id") or item.get("log_id")
+        for item in state.evidence_summary["items"]
+    ] == ["artifact-1", "metric-1", "log-1"]
     assert state.evidence_summary["items"][0]["label"] == "Final checkpoint"
 
 

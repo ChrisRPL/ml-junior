@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from agent.core.events import AgentEvent
+from backend.experiment_ledger import project_log_refs, project_metrics
 from backend.job_artifact_refs import project_active_jobs, project_artifact_refs
 from backend.operation_store import OperationRecord
 from backend.session_store import SessionRecord
@@ -101,6 +102,8 @@ def build_workflow_state(
     active_jobs: dict[str, dict[str, Any]] = {}
     recorded_active_jobs = _active_job_refs_from_events(session_id, unique_events)
     recorded_artifact_refs = _artifact_refs_from_events(session_id, unique_events)
+    recorded_metric_refs = _metric_refs_from_events(session_id, unique_events)
+    recorded_log_refs = _log_refs_from_events(session_id, unique_events)
     phase_projection: PhaseState | None = None
     phase_started_at: dict[str, str | None] = {}
     phase_blockers: list[dict[str, Any]] = []
@@ -181,7 +184,11 @@ def build_workflow_state(
         operation_refs=_operation_refs(operations or []),
         human_requests=[],
         budget=_budget_placeholder(),
-        evidence_summary=_evidence_summary(recorded_artifact_refs),
+        evidence_summary=_evidence_summary(
+            artifact_refs=recorded_artifact_refs,
+            metric_refs=recorded_metric_refs,
+            log_refs=recorded_log_refs,
+        ),
         live_tracking_refs=[_live_tracking_placeholder(session_id)],
         resume=WorkflowResumeState(event_sequence=last_event_sequence),
         compatibility=WorkflowCompatibility(
@@ -501,6 +508,26 @@ def _artifact_refs_from_events(
     ]
 
 
+def _metric_refs_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    return [
+        record.model_dump(mode="json", exclude_none=True)
+        for record in project_metrics(session_id, events)
+    ]
+
+
+def _log_refs_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    return [
+        record.model_dump(mode="json", exclude_none=True)
+        for record in project_log_refs(session_id, events)
+    ]
+
+
 def _budget_placeholder() -> dict[str, Any]:
     return {
         "source": "placeholder",
@@ -512,18 +539,37 @@ def _budget_placeholder() -> dict[str, Any]:
     }
 
 
-def _evidence_summary(artifact_refs: list[dict[str, Any]]) -> dict[str, Any]:
-    if not artifact_refs:
+def _evidence_summary(
+    *,
+    artifact_refs: list[dict[str, Any]],
+    metric_refs: list[dict[str, Any]],
+    log_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not artifact_refs and not metric_refs and not log_refs:
         return _evidence_summary_placeholder()
 
+    items = sorted(
+        [*artifact_refs, *metric_refs, *log_refs],
+        key=_evidence_item_sort_key,
+    )
     return {
         "source": "event",
         "status": "available",
         "claim_count": 0,
         "artifact_count": len(artifact_refs),
-        "metric_count": 0,
-        "items": artifact_refs,
+        "metric_count": len(metric_refs),
+        "log_count": len(log_refs),
+        "items": items,
     }
+
+
+def _evidence_item_sort_key(item: dict[str, Any]) -> tuple[int, str]:
+    sequence = item.get("source_event_sequence")
+    if isinstance(sequence, int):
+        sort_sequence = sequence
+    else:
+        sort_sequence = 0
+    return (sort_sequence, repr(sorted(item.items())))
 
 
 def _evidence_summary_placeholder() -> dict[str, Any]:
@@ -533,6 +579,7 @@ def _evidence_summary_placeholder() -> dict[str, Any]:
         "claim_count": 0,
         "artifact_count": 0,
         "metric_count": 0,
+        "log_count": 0,
         "items": [],
     }
 
