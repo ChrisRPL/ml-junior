@@ -533,6 +533,37 @@ def _valid_evidence_claim_link_recorded_payload() -> dict:
     }
 
 
+def _valid_verifier_completed_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "verdict_id": " verdict-1 ",
+        "verifier_id": " final-claims-have-evidence ",
+        "source_event_sequence": 14,
+        "verdict": "passed",
+        "scope": " final_answer ",
+        "final_answer_ref": " final-answer-1 ",
+        "phase_id": " phase-report ",
+        "run_id": " run-1 ",
+        "evidence_ids": [" evidence-1 "],
+        "claim_ids": [" claim-1 "],
+        "summary": " Claims have support. ",
+        "rationale": " Evidence supports the final claim. ",
+        "checks": [
+            {
+                "check_id": " check-1 ",
+                "name": " Claim coverage ",
+                "status": "passed",
+                "summary": " Claim is linked to evidence. ",
+                "evidence_ids": [" evidence-1 "],
+                "metadata": {"claim_id": "claim-1"},
+            }
+        ],
+        "metadata": {"source": "synthetic-fixture"},
+        "redaction_status": "none",
+        "created_at": " 2026-04-29T10:09:00Z ",
+    }
+
+
 def test_dataset_snapshot_recorded_payload_validates_and_normalizes():
     event = AgentEvent(
         session_id="session-a",
@@ -805,6 +836,112 @@ def test_evidence_claim_link_recorded_payload_validates_and_normalizes():
     assert event.data["claim_id"] == "claim-1"
     assert event.data["evidence_id"] == "evidence-1"
     assert event.data["rationale"] == "Metric exceeds baseline."
+
+
+def test_verifier_completed_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=18,
+        event_type="verifier.completed",
+        data=_valid_verifier_completed_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["verdict_id"] == "verdict-1"
+    assert event.data["verifier_id"] == "final-claims-have-evidence"
+    assert event.data["verdict"] == "passed"
+    assert event.data["scope"] == "final_answer"
+    assert event.data["evidence_ids"] == ["evidence-1"]
+    assert event.data["claim_ids"] == ["claim-1"]
+    assert event.data["checks"][0]["name"] == "Claim coverage"
+    assert event.data["checks"][0]["evidence_ids"] == ["evidence-1"]
+
+
+def test_verifier_completed_payload_rejects_unknown_fields():
+    payload = _valid_verifier_completed_payload()
+    payload["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=18,
+            event_type="verifier.completed",
+            data=payload,
+        )
+
+    payload = _valid_verifier_completed_payload()
+    payload["checks"][0]["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=18,
+            event_type="verifier.completed",
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("session_id",),
+        ("verdict_id",),
+        ("verifier_id",),
+        ("scope",),
+        ("evidence_ids", 0),
+        ("checks", 0, "name"),
+        ("checks", 0, "evidence_ids", 0),
+    ],
+)
+def test_verifier_completed_payload_rejects_empty_required_ids_and_text(path):
+    payload = _valid_verifier_completed_payload()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = ""
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=18,
+            event_type="verifier.completed",
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_event_sequence", 0),
+        ("verdict", "blocked"),
+        ("redaction_status", "complete"),
+    ],
+)
+def test_verifier_completed_payload_rejects_invalid_values(field, value):
+    payload = _valid_verifier_completed_payload()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=18,
+            event_type="verifier.completed",
+            data=payload,
+        )
+
+
+def test_verifier_completed_payload_rejects_invalid_check_status():
+    payload = _valid_verifier_completed_payload()
+    payload["checks"][0]["status"] = "blocked"
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=18,
+            event_type="verifier.completed",
+            data=payload,
+        )
 
 
 @pytest.mark.parametrize(

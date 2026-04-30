@@ -488,6 +488,41 @@ class EvidenceClaimLinkRecordedPayload(EvidenceLedgerPayload):
     created_at: NonEmptyStr | None = None
 
 
+class VerifierLedgerPayload(StrictEventPayload):
+    """Closed-schema base for inert verifier verdict event payloads."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class VerifierVerdictCheckPayload(VerifierLedgerPayload):
+    check_id: NonEmptyStr | None = None
+    name: NonEmptyStr
+    status: Literal["passed", "failed", "inconclusive"]
+    summary: NonEmptyStr | None = None
+    evidence_ids: list[NonEmptyStr] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class VerifierCompletedPayload(VerifierLedgerPayload):
+    session_id: NonEmptyStr
+    verdict_id: NonEmptyStr
+    verifier_id: NonEmptyStr
+    source_event_sequence: int | None = Field(default=None, ge=1)
+    verdict: Literal["passed", "failed", "inconclusive"]
+    scope: NonEmptyStr | None = None
+    final_answer_ref: NonEmptyStr | None = None
+    phase_id: NonEmptyStr | None = None
+    run_id: NonEmptyStr | None = None
+    evidence_ids: list[NonEmptyStr] = Field(default_factory=list)
+    claim_ids: list[NonEmptyStr] = Field(default_factory=list)
+    summary: NonEmptyStr | None = None
+    rationale: NonEmptyStr | None = None
+    checks: list[VerifierVerdictCheckPayload] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    redaction_status: Literal["none", "partial", "redacted"]
+    created_at: NonEmptyStr | None = None
+
+
 EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
     "ready": MessagePayload,
     "processing": MessagePayload,
@@ -518,6 +553,7 @@ EVENT_PAYLOAD_MODELS: dict[str, type[EventPayload]] = {
     "artifact_ref.recorded": ArtifactRefRecordedPayload,
     "evidence_item.recorded": EvidenceItemRecordedPayload,
     "evidence_claim_link.recorded": EvidenceClaimLinkRecordedPayload,
+    "verifier.completed": VerifierCompletedPayload,
 }
 
 
