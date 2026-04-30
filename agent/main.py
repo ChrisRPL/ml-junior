@@ -4,6 +4,10 @@ Interactive CLI chat with the agent
 Supports two modes:
   Interactive:  python -m agent.main
   Headless:     python -m agent.main "find me bird datasets"
+
+Installed CLI aliases:
+  ml-junior
+  ml-intern (compatibility)
 """
 
 import argparse
@@ -1292,7 +1296,7 @@ async def headless_main(
 
 
 def cli():
-    """Entry point for the ml-intern CLI command."""
+    """Entry point for the ml-junior and ml-intern CLI commands."""
     import logging as _logging
     import warnings
     # Suppress aiohttp "Unclosed client session" noise during event loop teardown
@@ -1302,7 +1306,7 @@ def cli():
     # Suppress whoosh invalid escape sequence warnings (third-party, unfixed upstream)
     warnings.filterwarnings("ignore", category=SyntaxWarning, module="whoosh")
 
-    parser = argparse.ArgumentParser(description="Hugging Face Agent CLI")
+    parser = argparse.ArgumentParser(description="ML Junior CLI")
     parser.add_argument("prompt", nargs="?", default=None, help="Run headlessly with this prompt")
     parser.add_argument("--model", "-m", default=None, help=f"Model to use (default: from config)")
     parser.add_argument("--max-iterations", type=int, default=None,

@@ -1,64 +1,104 @@
 <p align="center">
-  <img src="frontend/public/smolagents.webp" alt="smolagents logo" width="160" />
+  <img src="frontend/public/terminal-cap/logo-terminal-cap-wordmark.svg" alt="ML Junior Terminal Cap wordmark" width="420" />
 </p>
 
-# ML Intern
+# ML Junior
 
-An ML intern that autonomously researches, writes, and ships good quality ML releated code using the Hugging Face ecosystem — with deep access to docs, papers, datasets, and cloud compute.
+ML Junior is an agentic ML engineering workspace for researching, planning,
+implementing, and verifying machine-learning work with the Hugging Face
+ecosystem. It combines a Python async agent runtime, a CLI, a FastAPI backend,
+and a Vite/React browser shell with access to docs, papers, datasets,
+repositories, Jobs, and local or sandboxed execution.
+
+This repository is being rebranded from the upstream `ml-intern` lineage.
+Use `ml-junior` for new local workflows. The legacy `ml-intern` command remains
+available and points at the same safe CLI entrypoint for compatibility with
+existing scripts, docs, and upstream habits.
+
+Terminal Cap is the current visual direction for ML Junior. The tracked assets
+live in `frontend/public/terminal-cap/`, including the mark, wordmark, banner,
+and empty-state illustrations. Treat those assets as branding direction in
+progress, not a claim that every product surface is complete.
 
 ## Quick Start
 
 ### Installation
 
 ```bash
-git clone git@github.com:huggingface/ml-intern.git
-cd ml-intern
+git clone <repo-url> ml-junior
+cd ml-junior
 uv sync
 uv tool install -e .
 ```
 
-#### That's it. Now `ml-intern` works from any directory:
+If you are cloning from an upstream Hugging Face remote, the repository URL or
+checkout directory may still contain `ml-intern`. That is expected during the
+transition; the installed CLI scripts remain compatible.
+
+After installation, both commands launch the same CLI:
 
 ```bash
+ml-junior
 ml-intern
 ```
 
-Create a `.env` file in the project root (or export these in your shell):
+Create a `.env` file in the project root, or export these in your shell:
 
 ```bash
-ANTHROPIC_API_KEY=<your-anthropic-api-key> # if using anthropic models
+ANTHROPIC_API_KEY=<your-anthropic-api-key> # if using Anthropic models
 HF_TOKEN=<your-hugging-face-token>
-GITHUB_TOKEN=<github-personal-access-token> 
+GITHUB_TOKEN=<github-personal-access-token>
 ```
-If no `HF_TOKEN` is set, the CLI will prompt you to paste one on first launch. To get a GITHUB_TOKEN follow the tutorial [here](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token).
 
-### Usage
+If no `HF_TOKEN` is set, the CLI prompts you to paste one on first launch.
+To create a `GITHUB_TOKEN`, follow GitHub's
+[personal access token docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token).
 
-**Interactive mode** (start a chat session):
+## Usage
+
+Interactive mode starts a chat session:
 
 ```bash
-ml-intern
+ml-junior
 ```
 
-**Headless mode** (single prompt, auto-approve):
+Headless mode runs one prompt:
 
 ```bash
-ml-intern "fine-tune llama on my dataset"
+ml-junior "fine-tune llama on my dataset"
 ```
 
-**Options:**
+Common options:
 
 ```bash
-ml-intern --model anthropic/claude-opus-4-6 "your prompt"
-ml-intern --max-iterations 100 "your prompt"
-ml-intern --no-stream "your prompt"
+ml-junior --model anthropic/claude-opus-4-6 "your prompt"
+ml-junior --max-iterations 100 "your prompt"
+ml-junior --no-stream "your prompt"
 ```
+
+Compatibility: replace `ml-junior` with `ml-intern` in any command above when
+an existing workflow depends on the upstream name. Both scripts resolve to
+`agent.main:cli`.
+
+## Current Shape
+
+- Python async agent runtime with queue-driven turns and tool calls.
+- FastAPI backend with session APIs and server-sent event streaming.
+- Vite/React frontend for the browser experience.
+- Tool surface for Hugging Face docs, papers, datasets, repositories, Jobs,
+  GitHub examples, planning, local execution, and sandbox execution.
+- Guardrails around approvals, redaction, local writes, sandbox actions, and
+  network-dependent work.
+
+Some internal package names, comments, and compatibility paths may still use
+upstream `ml-intern` or older Hugging Face agent naming. Keep those names when
+they preserve compatibility; prefer ML Junior naming for new user-facing copy.
 
 ## Architecture
 
 ### Component Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                         User/CLI                            │
 └────────────┬─────────────────────────────────────┬──────────┘
@@ -78,49 +118,14 @@ ml-intern --no-stream "your prompt"
 │  │         Handlers.run_agent()                 │  ├──┤
 │  │                                              │  │  │
 │  │  ┌────────────────────────────────────────┐  │  │  │
-│  │  │  Agentic Loop (max 300 iterations)     │  │  │  │
+│  │  │  Agentic Loop                         │  │  │  │
 │  │  │                                        │  │  │  │
 │  │  │  ┌──────────────────────────────────┐  │  │  │  │
 │  │  │  │ Session                          │  │  │  │  │
-│  │  │  │  ┌────────────────────────────┐  │  │  │  │  │
-│  │  │  │  │ ContextManager             │  │  │  │  │  │
-│  │  │  │  │ • Message history          │  │  │  │  │  │
-│  │  │  │  │   (litellm.Message[])      │  │  │  │  │  │
-│  │  │  │  │ • Auto-compaction (170k)   │  │  │  │  │  │
-│  │  │  │  │ • Session upload to HF     │  │  │  │  │  │
-│  │  │  │  └────────────────────────────┘  │  │  │  │  │
-│  │  │  │                                  │  │  │  │  │
-│  │  │  │  ┌────────────────────────────┐  │  │  │  │  │
-│  │  │  │  │ ToolRouter                 │  │  │  │  │  │
-│  │  │  │  │  ├─ HF docs & research     │  │  │  │  │  │
-│  │  │  │  │  ├─ HF repos, datasets,    │  │  │  │  │  │
-│  │  │  │  │  │  jobs, papers           │  │  │  │  │  │
-│  │  │  │  │  ├─ GitHub code search     │  │  │  │  │  │
-│  │  │  │  │  ├─ Sandbox & local tools  │  │  │  │  │  │
-│  │  │  │  │  ├─ Planning               │  │  │  │  │  │
-│  │  │  │  │  └─ MCP server tools       │  │  │  │  │  │
-│  │  │  │  └────────────────────────────┘  │  │  │  │  │
+│  │  │  │  ├─ ContextManager               │  │  │  │  │
+│  │  │  │  ├─ ToolRouter                   │  │  │  │  │
+│  │  │  │  └─ Doom loop detector           │  │  │  │  │
 │  │  │  └──────────────────────────────────┘  │  │  │  │
-│  │  │                                        │  │  │  │
-│  │  │  ┌──────────────────────────────────┐  │  │  │  │
-│  │  │  │ Doom Loop Detector               │  │  │  │  │
-│  │  │  │ • Detects repeated tool patterns │  │  │  │  │
-│  │  │  │ • Injects corrective prompts     │  │  │  │  │
-│  │  │  └──────────────────────────────────┘  │  │  │  │
-│  │  │                                        │  │  │  │
-│  │  │  Loop:                                 │  │  │  │
-│  │  │    1. LLM call (litellm.acompletion)   │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    2. Parse tool_calls[]               │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    3. Approval check                   │  │  │  │
-│  │  │       (jobs, sandbox, destructive ops) │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    4. Execute via ToolRouter           │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    5. Add results to ContextManager    │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    6. Repeat if tool_calls exist       │  │  │  │
 │  │  └────────────────────────────────────────┘  │  │  │
 │  └──────────────────────────────────────────────┘  │  │
 └────────────────────────────────────────────────────┴──┘
@@ -128,43 +133,29 @@ ml-intern --no-stream "your prompt"
 
 ### Agentic Loop Flow
 
-```
-User Message
+```text
+User message
      ↓
-[Add to ContextManager]
+Add to ContextManager
      ↓
-     ╔═══════════════════════════════════════════╗
-     ║      Iteration Loop (max 300)             ║
-     ║                                           ║
-     ║  Get messages + tool specs                ║
-     ║         ↓                                 ║
-     ║  litellm.acompletion()                    ║
-     ║         ↓                                 ║
-     ║  Has tool_calls? ──No──> Done             ║
-     ║         │                                 ║
-     ║        Yes                                ║
-     ║         ↓                                 ║
-     ║  Add assistant msg (with tool_calls)      ║
-     ║         ↓                                 ║
-     ║  Doom loop check                          ║
-     ║         ↓                                 ║
-     ║  For each tool_call:                      ║
-     ║    • Needs approval? ──Yes──> Wait for    ║
-     ║    │                         user confirm ║
-     ║    No                                     ║
-     ║    ↓                                      ║
-     ║    • ToolRouter.execute_tool()            ║
-     ║    • Add result to ContextManager         ║
-     ║         ↓                                 ║
-     ║  Continue loop ─────────────────┐         ║
-     ║         ↑                       │         ║
-     ║         └───────────────────────┘         ║
-     ╚═══════════════════════════════════════════╝
+Iteration loop
+     ↓
+LLM call
+     ↓
+Parse tool calls
+     ↓
+Approval check
+     ↓
+Execute via ToolRouter
+     ↓
+Add results to ContextManager
+     ↓
+Repeat until done
 ```
 
 ## Events
 
-The agent emits the following events via `event_queue`:
+The agent emits events via `event_queue`:
 
 - `processing` - Starting to process user input
 - `ready` - Agent is ready for input
@@ -185,7 +176,7 @@ The agent emits the following events via `event_queue`:
 
 ## Development
 
-### Adding Built-in Tools
+### Adding Built-In Tools
 
 Edit `agent/core/tools.py`:
 
@@ -200,11 +191,10 @@ def create_builtin_tools() -> list[ToolSpec]:
                 "properties": {
                     "param": {"type": "string", "description": "Parameter description"}
                 },
-                "required": ["param"]
+                "required": ["param"],
             },
-            handler=your_async_handler
+            handler=your_async_handler,
         ),
-        # ... existing tools
     ]
 ```
 
@@ -227,4 +217,4 @@ Edit `configs/main_agent_config.json`:
 }
 ```
 
-Note: Environment variables like `${YOUR_TOKEN}` are auto-substituted from `.env`.
+Environment variables like `${YOUR_TOKEN}` are substituted from `.env`.

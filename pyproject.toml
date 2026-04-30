@@ -1,7 +1,7 @@
 [project]
 name = "hf-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "ML Junior agentic ML engineering workspace"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -49,6 +49,7 @@ all = [
 ]
 
 [project.scripts]
+ml-junior = "agent.main:cli"
 ml-intern = "agent.main:cli"
 
 [build-system]
