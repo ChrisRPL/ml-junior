@@ -7,6 +7,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from backend.flow_verifier_mapping import (
+    FlowVerifierCoverageReport,
+    build_flow_verifier_coverage_report,
+    get_catalog_check_id_for_flow_verifier,
+)
+from backend.verifier_check_catalog import get_builtin_verifier_check
+
 
 SUPPORTED_SCHEMA_VERSION = "v1"
 BUILTIN_FLOW_TEMPLATE_DIR = Path(__file__).resolve().parent / "builtin_flow_templates"
@@ -236,6 +243,9 @@ def build_flow_preview(template: FlowTemplate) -> dict[str, Any]:
     phase_ids_by_approval = _phase_ids_by_reference(template, "approval_points")
     phase_ids_by_output = _phase_ids_by_reference(template, "required_outputs")
     phase_ids_by_verifier = _phase_ids_by_reference(template, "verifiers")
+    verifier_coverage = build_flow_verifier_coverage_report(
+        verifier.id for verifier in template.verifiers
+    )
 
     approval_points = [
         {
@@ -255,6 +265,7 @@ def build_flow_preview(template: FlowTemplate) -> dict[str, Any]:
         {
             **verifier.model_dump(),
             "phase_ids": phase_ids_by_verifier.get(verifier.id, []),
+            **_verifier_catalog_metadata(verifier.id, verifier_coverage),
         }
         for verifier in template.verifiers
     ]
@@ -281,6 +292,17 @@ def build_flow_preview(template: FlowTemplate) -> dict[str, Any]:
         "required_outputs": required_outputs,
         "artifacts": [artifact.model_dump() for artifact in template.artifacts],
         "verifier_checks": verifier_checks,
+        "verifier_catalog_coverage": {
+            "verifier_count": verifier_coverage.verifier_count,
+            "mapped_count": verifier_coverage.mapped_count,
+            "unmapped_count": verifier_coverage.unmapped_count,
+            "intentional_unmapped_verifier_ids": list(
+                verifier_coverage.intentional_unmapped_verifier_ids
+            ),
+            "unknown_unmapped_verifier_ids": list(
+                verifier_coverage.unknown_unmapped_verifier_ids
+            ),
+        },
         "risky_operations": _risky_operations(template, phase_ids_by_approval),
     }
 
@@ -394,6 +416,42 @@ def _risky_operations(
         }
         for approval in template.approval_points
     ]
+
+
+def _verifier_catalog_metadata(
+    verifier_id: str,
+    coverage_report: FlowVerifierCoverageReport,
+) -> dict[str, Any]:
+    catalog_check_id = get_catalog_check_id_for_flow_verifier(verifier_id)
+    if catalog_check_id is None:
+        intentional_unmapped = (
+            verifier_id in coverage_report.intentional_unmapped_verifier_ids
+        )
+        return {
+            "mapping_status": (
+                "intentional_unmapped"
+                if intentional_unmapped
+                else "unknown_unmapped"
+            ),
+            "catalog_check_id": None,
+            "catalog_check_name": None,
+            "catalog_check_category": None,
+            "catalog_check_type": None,
+            "catalog_evidence_ref_types": [],
+        }
+
+    catalog_check = get_builtin_verifier_check(catalog_check_id)
+    return {
+        "mapping_status": "mapped",
+        "catalog_check_id": catalog_check.check_id,
+        "catalog_check_name": catalog_check.name,
+        "catalog_check_category": catalog_check.category,
+        "catalog_check_type": catalog_check.check_type,
+        "catalog_evidence_ref_types": [
+            requirement.ref_type
+            for requirement in catalog_check.evidence_requirements
+        ],
+    }
 
 
 def _load_yaml(path: Path) -> Any:

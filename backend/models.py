@@ -688,14 +688,37 @@ class FlowArtifactPreview(BaseModel):
     required: bool = True
 
 
+FlowVerifierMappingStatus = Literal[
+    "mapped",
+    "intentional_unmapped",
+    "unknown_unmapped",
+]
+
+
 class FlowVerifierCheckPreview(BaseModel):
-    """Verifier check preview with phase references."""
+    """Verifier check preview with phase and catalog mapping metadata."""
 
     id: str
     type: str
     description: str
     required: bool = True
     phase_ids: list[str]
+    mapping_status: FlowVerifierMappingStatus
+    catalog_check_id: str | None = None
+    catalog_check_name: str | None = None
+    catalog_check_category: str | None = None
+    catalog_check_type: str | None = None
+    catalog_evidence_ref_types: list[str]
+
+
+class FlowVerifierCatalogCoveragePreview(BaseModel):
+    """Flow-local verifier to catalog coverage summary."""
+
+    verifier_count: int
+    mapped_count: int
+    unmapped_count: int
+    intentional_unmapped_verifier_ids: list[str]
+    unknown_unmapped_verifier_ids: list[str]
 
 
 class FlowRiskyOperationPreview(BaseModel):
@@ -727,6 +750,7 @@ class FlowPreviewResponse(BaseModel):
     required_outputs: list[FlowRequiredOutputPreview]
     artifacts: list[FlowArtifactPreview]
     verifier_checks: list[FlowVerifierCheckPreview]
+    verifier_catalog_coverage: FlowVerifierCatalogCoveragePreview
     risky_operations: list[FlowRiskyOperationPreview]
 
 
