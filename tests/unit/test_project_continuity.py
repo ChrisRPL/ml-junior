@@ -16,7 +16,9 @@ from backend.models import (
     WorkflowState,
 )
 from backend.project_continuity import (
+    checkpoint_created_payload,
     checkpoint_from_event,
+    fork_point_created_payload,
     fork_point_from_event,
     generate_handoff_summary,
     handoff_summary_created_payload,
@@ -169,6 +171,152 @@ def test_fork_point_accepts_only_typed_refs_without_creating_records():
                 "refs": [{"type": "dataset", "id": "implicit-create"}],
             },
         )
+
+
+def test_checkpoint_created_payload_builder_validates_supported_refs():
+    payload = checkpoint_created_payload(
+        session_id="session-a",
+        checkpoint_id="checkpoint-refs",
+        reason="before publish",
+        phase_id="publish",
+        source_event_sequence=42,
+        refs=[
+            {"type": "phase", "phase_id": "publish"},
+            {"type": "run", "run_id": "run-7"},
+            {"type": "code_snapshot", "snapshot_id": "code-3"},
+            {"type": "dataset_snapshot", "snapshot_id": "data-2"},
+            {"type": "model_checkpoint", "checkpoint_id": "model-5"},
+            {"type": "event_sequence", "sequence": 42},
+        ],
+    )
+
+    event = make_event(
+        sequence=43,
+        event_type="checkpoint.created",
+        data=payload,
+    )
+    checkpoint = checkpoint_from_event(event)
+
+    assert payload == {
+        "session_id": "session-a",
+        "checkpoint_id": "checkpoint-refs",
+        "reason": "before publish",
+        "phase_id": "publish",
+        "source_event_sequence": 42,
+        "refs": [
+            {"type": "phase", "phase_id": "publish"},
+            {"type": "run", "run_id": "run-7"},
+            {"type": "code_snapshot", "snapshot_id": "code-3"},
+            {"type": "dataset_snapshot", "snapshot_id": "data-2"},
+            {"type": "model_checkpoint", "checkpoint_id": "model-5"},
+            {"type": "event_sequence", "sequence": 42},
+        ],
+    }
+    assert checkpoint.source_event_sequence == 42
+
+
+def test_fork_point_created_payload_builder_preserves_refs_and_source_sequence():
+    payload = fork_point_created_payload(
+        session_id="session-a",
+        fork_point_id="fork-refs",
+        reason="try alternate model",
+        source_event_sequence=51,
+        refs=[
+            {"type": "phase", "phase_id": "train"},
+            {"type": "run", "run_id": "run-9"},
+            {"type": "code_snapshot", "snapshot_id": "code-4"},
+            {"type": "dataset_snapshot", "snapshot_id": "data-5"},
+            {"type": "model_checkpoint", "checkpoint_id": "model-6"},
+            {"type": "event_sequence", "sequence": 51},
+        ],
+    )
+
+    event = make_event(
+        sequence=52,
+        event_type="fork_point.created",
+        data=payload,
+    )
+    fork_point = fork_point_from_event(event)
+
+    assert payload["source_event_sequence"] == 51
+    assert payload["refs"] == [
+        {"type": "phase", "phase_id": "train"},
+        {"type": "run", "run_id": "run-9"},
+        {"type": "code_snapshot", "snapshot_id": "code-4"},
+        {"type": "dataset_snapshot", "snapshot_id": "data-5"},
+        {"type": "model_checkpoint", "checkpoint_id": "model-6"},
+        {"type": "event_sequence", "sequence": 51},
+    ]
+    assert [ref.type for ref in fork_point.refs] == [
+        "phase",
+        "run",
+        "code_snapshot",
+        "dataset_snapshot",
+        "model_checkpoint",
+        "event_sequence",
+    ]
+
+
+def test_continuity_payload_builders_do_not_infer_refs_or_include_none():
+    checkpoint_payload = checkpoint_created_payload(
+        session_id="session-a",
+        checkpoint_id="checkpoint-minimal",
+        reason="manual checkpoint",
+    )
+    fork_payload = fork_point_created_payload(
+        session_id="session-a",
+        fork_point_id="fork-minimal",
+    )
+
+    assert checkpoint_payload == {
+        "session_id": "session-a",
+        "checkpoint_id": "checkpoint-minimal",
+        "reason": "manual checkpoint",
+    }
+    assert fork_payload == {
+        "session_id": "session-a",
+        "fork_point_id": "fork-minimal",
+        "refs": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("builder", "kwargs"),
+    [
+        (
+            checkpoint_created_payload,
+            {
+                "session_id": "session-a",
+                "checkpoint_id": "checkpoint-bad",
+                "reason": "bad ref",
+                "refs": [{"type": "dataset", "id": "implicit-create"}],
+            },
+        ),
+        (
+            fork_point_created_payload,
+            {
+                "session_id": "session-a",
+                "fork_point_id": "fork-bad",
+                "refs": [{"type": "event_sequence", "sequence": 0}],
+            },
+        ),
+        (
+            checkpoint_created_payload,
+            {
+                "session_id": "session-a",
+                "checkpoint_id": "checkpoint-bad-sequence",
+                "reason": "bad source sequence",
+                "source_event_sequence": 0,
+            },
+        ),
+    ],
+)
+def test_continuity_payload_builders_fail_invalid_refs_through_models(
+    builder,
+    kwargs,
+):
+    with pytest.raises(ValidationError):
+        builder(**kwargs)
 
 
 def test_handoff_summary_unknown_sections_stay_empty_or_not_recorded():

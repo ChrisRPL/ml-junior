@@ -47,6 +47,46 @@ def fork_point_from_event(event: AgentEvent) -> ProjectForkPoint:
     return ProjectForkPoint.model_validate(event.data or {})
 
 
+def checkpoint_created_payload(
+    *,
+    session_id: str,
+    checkpoint_id: str,
+    reason: str,
+    phase_id: str | None = None,
+    source_event_sequence: int | None = None,
+    refs: Sequence[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a checkpoint.created payload from caller-supplied metadata."""
+    checkpoint = ProjectCheckpoint(
+        session_id=session_id,
+        checkpoint_id=checkpoint_id,
+        reason=reason,
+        phase_id=phase_id,
+        source_event_sequence=source_event_sequence,
+        refs=list(refs) if refs is not None else None,
+    )
+    return checkpoint.model_dump(mode="json", exclude_none=True)
+
+
+def fork_point_created_payload(
+    *,
+    session_id: str,
+    fork_point_id: str,
+    reason: str | None = None,
+    source_event_sequence: int | None = None,
+    refs: Sequence[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a fork_point.created payload from caller-supplied metadata."""
+    fork_point = ProjectForkPoint(
+        session_id=session_id,
+        fork_point_id=fork_point_id,
+        reason=reason,
+        source_event_sequence=source_event_sequence,
+        refs=list(refs) if refs is not None else [],
+    )
+    return fork_point.model_dump(mode="json", exclude_none=True)
+
+
 def handoff_summary_created_payload(
     *,
     handoff_id: str,
