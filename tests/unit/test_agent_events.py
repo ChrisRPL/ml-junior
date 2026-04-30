@@ -16,6 +16,7 @@ from backend.human_requests import (
     HUMAN_REQUEST_REQUESTED_EVENT,
     HUMAN_REQUEST_RESOLVED_EVENT,
 )
+from backend.models import canonical_artifact_ref_uri
 
 
 def make_session(event_queue, test_config, fake_tool_router) -> Session:
@@ -620,7 +621,7 @@ def _valid_artifact_ref_recorded_payload() -> dict:
         "source_event_sequence": 9,
         "type": " model_checkpoint ",
         "source": "job",
-        "ref_uri": " file:///tmp/model.pt ",
+        "ref_uri": f" {canonical_artifact_ref_uri('session-a', 'artifact-1')} ",
         "locator": {
             "type": "local_path",
             "path": " /tmp/model.pt ",
@@ -1071,7 +1072,7 @@ def test_artifact_ref_recorded_payload_validates_and_normalizes():
     assert event.data["type"] == "model_checkpoint"
     assert event.data["source_tool_call_id"] == "tc-1"
     assert event.data["source_job_id"] == "active-job-1"
-    assert event.data["ref_uri"] == "file:///tmp/model.pt"
+    assert event.data["ref_uri"] == "mlj-artifact://session/session-a/artifact-1"
     assert event.data["locator"] == {
         "type": "local_path",
         "path": "/tmp/model.pt",
@@ -1085,56 +1086,65 @@ def test_artifact_ref_recorded_payload_validates_and_normalizes():
 
 
 @pytest.mark.parametrize(
-    ("source", "ref_uri", "locator"),
+    ("source", "locator", "compat_uri"),
     [
         (
             "local_path",
+            {
+                "type": "local_path",
+                "path": "/tmp/model.pt",
+                "uri": "file:///tmp/model.pt",
+            },
             "file:///tmp/model.pt",
-            {"type": "local_path", "path": "/tmp/model.pt"},
         ),
         (
             "sandbox",
-            "sandbox://sbx-1/artifacts/model.pt",
             {
                 "type": "sandbox",
                 "sandbox_id": "sbx-1",
                 "path": "/artifacts/model.pt",
+                "uri": "sandbox://sbx-1/artifacts/model.pt",
             },
+            "sandbox://sbx-1/artifacts/model.pt",
         ),
         (
             "hf_hub",
-            "hf://model/org/model/resolve/main/model.safetensors",
             {
                 "type": "hf_hub",
                 "repo_id": "org/model",
                 "repo_type": "model",
                 "revision": "main",
                 "path": "model.safetensors",
+                "uri": "hf://model/org/model/resolve/main/model.safetensors",
             },
+            "hf://model/org/model/resolve/main/model.safetensors",
         ),
         (
             "remote_uri",
-            "https://artifacts.example/model.pt",
             {"type": "remote_uri", "uri": "https://artifacts.example/model.pt"},
+            "https://artifacts.example/model.pt",
         ),
         (
             "event_ref",
-            "event://event-artifact/4",
             {"type": "event_ref", "event_id": "event-artifact", "sequence": 4},
+            "event://session-a/4#/data/artifacts/0",
         ),
     ],
 )
 def test_artifact_ref_recorded_payload_accepts_locator_sources(
     source,
-    ref_uri,
     locator,
+    compat_uri,
 ):
     payload = _valid_artifact_ref_recorded_payload()
+    artifact_id = f"artifact-{source}"
     payload.update(
         {
+            "artifact_id": artifact_id,
             "source": source,
-            "ref_uri": ref_uri,
+            "ref_uri": canonical_artifact_ref_uri("session-a", artifact_id),
             "locator": locator,
+            "uri": compat_uri,
         }
     )
 
@@ -1146,8 +1156,42 @@ def test_artifact_ref_recorded_payload_accepts_locator_sources(
     )
 
     assert event.data["source"] == source
-    assert event.data["ref_uri"] == ref_uri
+    assert event.data["ref_uri"] == canonical_artifact_ref_uri(
+        "session-a",
+        artifact_id,
+    )
+    assert event.data["ref_uri"] != compat_uri
+    assert event.data["uri"] == compat_uri
     assert event.data["locator"]["type"] == locator["type"]
+
+
+def test_artifact_ref_recorded_payload_accepts_legacy_ref_without_ref_uri():
+    payload = _valid_artifact_ref_recorded_payload()
+    payload.pop("ref_uri")
+    payload.update(
+        {
+            "source": "remote_uri",
+            "path": None,
+            "uri": "https://artifacts.example/legacy-model.pt",
+            "locator": {
+                "type": "remote_uri",
+                "uri": "https://artifacts.example/legacy-model.pt",
+            },
+        }
+    )
+
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=13,
+        event_type="artifact_ref.recorded",
+        data=payload,
+    )
+
+    assert "ref_uri" not in event.data
+    assert event.data["uri"] == "https://artifacts.example/legacy-model.pt"
+    assert event.data["locator"]["uri"] == (
+        "https://artifacts.example/legacy-model.pt"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1178,7 +1222,7 @@ def test_artifact_ref_recorded_payload_redacts_schema_metadata_in_event_copy():
     payload = _valid_artifact_ref_recorded_payload()
     payload.update(
         {
-            "ref_uri": f"https://artifacts.example/ref?token={secret}",
+            "ref_uri": canonical_artifact_ref_uri("session-a", "artifact-1"),
             "locator": {
                 "type": "remote_uri",
                 "uri": f"https://artifacts.example/blob?token={secret}",

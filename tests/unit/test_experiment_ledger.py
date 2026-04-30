@@ -64,6 +64,7 @@ from backend.models import (  # noqa: E402
     ExperimentRunRecord,
     LogRefRecord,
     MetricRecord,
+    canonical_artifact_ref_uri,
 )
 
 
@@ -391,14 +392,16 @@ def test_artifact_ref_schema_metadata_round_trips_through_event_projection():
     artifact_ref = make_artifact_ref(
         artifact_id="artifact-schema",
         source="hf_hub",
-        ref_uri="hf://model/org/model/resolve/main/model.safetensors",
+        ref_uri=canonical_artifact_ref_uri("session-a", "artifact-schema"),
         locator={
             "type": "hf_hub",
             "repo_id": "org/model",
             "repo_type": "model",
             "revision": "main",
             "path": "model.safetensors",
+            "uri": "hf://model/org/model/resolve/main/model.safetensors",
         },
+        uri="hf://model/org/model/resolve/main/model.safetensors",
         lifecycle="available",
         mime_type="application/octet-stream",
         size_bytes=2048,
@@ -412,7 +415,31 @@ def test_artifact_ref_schema_metadata_round_trips_through_event_projection():
     ) == artifact_ref
     assert artifact_ref_record_from_event(event) == artifact_ref
     assert project_artifact_refs("session-a", [event]) == [artifact_ref]
+    assert event.data["ref_uri"] == (
+        "mlj-artifact://session/session-a/artifact-schema"
+    )
     assert event.data["locator"]["repo_id"] == "org/model"
+    assert event.data["locator"]["uri"] == (
+        "hf://model/org/model/resolve/main/model.safetensors"
+    )
+    assert event.data["uri"] == "hf://model/org/model/resolve/main/model.safetensors"
+
+
+def test_legacy_artifact_ref_without_ref_uri_round_trips_through_projection():
+    artifact_ref = make_artifact_ref(
+        artifact_id="artifact-legacy",
+        ref_uri=None,
+        source="event_ref",
+        path=None,
+        uri="event://session-a/12#/data/artifacts/0",
+        locator={"type": "event_ref", "event_id": "event-12", "sequence": 12},
+    )
+    event = make_artifact_ref_event(artifact_ref)
+
+    assert artifact_ref.ref_uri is None
+    assert artifact_ref_record_from_event(event) == artifact_ref
+    assert project_artifact_refs("session-a", [event]) == [artifact_ref]
+    assert event.data["uri"] == "event://session-a/12#/data/artifacts/0"
 
 
 def test_event_to_record_validation_rejects_wrong_type_and_session_mismatch():
@@ -851,7 +878,7 @@ def test_persisted_json_redacts_standalone_record_secrets(tmp_path):
     )
     artifact_ref = make_artifact_ref(
         artifact_id="artifact-secret",
-        ref_uri=f"https://artifacts.example/ref?token={artifact_secret}",
+        ref_uri=canonical_artifact_ref_uri("session-a", "artifact-secret"),
         locator={
             "type": "remote_uri",
             "uri": f"https://artifacts.example/blob?token={artifact_secret}",
@@ -868,9 +895,8 @@ def test_persisted_json_redacts_standalone_record_secrets(tmp_path):
     assert metric_secret not in str(created_metric.model_dump())
     assert log_secret not in str(created_log.model_dump())
     assert artifact_secret not in str(created_artifact.model_dump())
-    assert (
-        created_artifact.ref_uri
-        == "https://artifacts.example/ref?token=[REDACTED]"
+    assert created_artifact.ref_uri == (
+        "mlj-artifact://session/session-a/artifact-secret"
     )
     assert created_artifact.locator is not None
     assert (
@@ -1003,6 +1029,12 @@ def _valid_artifact_ref_payload(
         "source_event_sequence": 10,
         "type": "model_checkpoint",
         "source": "job",
+        "ref_uri": canonical_artifact_ref_uri(session_id, artifact_id),
+        "locator": {
+            "type": "local_path",
+            "path": "/tmp/model.pt",
+            "uri": "file:///tmp/model.pt",
+        },
         "source_tool_call_id": "tc-1",
         "source_job_id": "job-1",
         "path": "/tmp/model.pt",

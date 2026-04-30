@@ -8,6 +8,14 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
+ARTIFACT_REF_URI_SCHEME = "mlj-artifact"
+ARTIFACT_REF_URI_SESSION_PREFIX = f"{ARTIFACT_REF_URI_SCHEME}://session"
+
+
+def canonical_artifact_ref_uri(session_id: str, artifact_id: str) -> str:
+    """Return the stable in-product handle for a session artifact."""
+    return f"{ARTIFACT_REF_URI_SESSION_PREFIX}/{session_id}/{artifact_id}"
+
 
 class OpType(str, Enum):
     """Operation types matching agent/core/agent_loop.py."""
@@ -465,6 +473,12 @@ class LogRefRecord(ExperimentLogRef):
 
 
 class ExperimentArtifactRef(ExperimentLedgerModel):
+    """Lightweight nested artifact pointer on experiment runs.
+
+    Keep durable identity on standalone ArtifactRefRecord.ref_uri. The nested
+    uri stays compatibility/display metadata for existing run payloads.
+    """
+
     artifact_id: NonEmptyStr
     type: NonEmptyStr
     source: Literal["local_path", "sandbox", "remote_uri", "hf_hub", "event_ref"]
@@ -560,7 +574,11 @@ class ActiveJobRecord(ExperimentLedgerModel):
 
 
 class ArtifactRefRecord(ExperimentLedgerModel):
-    """Inert artifact reference projected from durable events."""
+    """Inert artifact reference projected from durable events.
+
+    ref_uri is the stable MLJ artifact handle. Storage-specific paths and URLs
+    stay in locator plus compatibility path/uri fields.
+    """
 
     session_id: NonEmptyStr
     artifact_id: NonEmptyStr
@@ -576,8 +594,21 @@ class ArtifactRefRecord(ExperimentLedgerModel):
         "event_ref",
         "manual",
     ]
-    ref_uri: NonEmptyStr | None = None
-    locator: ArtifactLocator | None = None
+    ref_uri: NonEmptyStr | None = Field(
+        default=None,
+        description=(
+            "Stable in-product MLJ artifact handle such as "
+            f"{ARTIFACT_REF_URI_SESSION_PREFIX}/<session_id>/<artifact_id>; "
+            "external paths and URLs belong in locator, path, or uri."
+        ),
+    )
+    locator: ArtifactLocator | None = Field(
+        default=None,
+        description=(
+            "Storage-specific locator metadata for local, Hub, remote, sandbox, "
+            "or event references."
+        ),
+    )
     lifecycle: Literal[
         "planned",
         "recorded",
@@ -593,8 +624,17 @@ class ArtifactRefRecord(ExperimentLedgerModel):
     export_policy: dict[str, Any] | None = None
     source_tool_call_id: NonEmptyStr | None = None
     source_job_id: NonEmptyStr | None = None
-    path: NonEmptyStr | None = None
-    uri: NonEmptyStr | None = None
+    path: NonEmptyStr | None = Field(
+        default=None,
+        description="Compatibility local path; not the canonical artifact identity.",
+    )
+    uri: NonEmptyStr | None = Field(
+        default=None,
+        description=(
+            "Compatibility external/display URI; not the canonical artifact "
+            "identity."
+        ),
+    )
     digest: NonEmptyStr | None = None
     label: NonEmptyStr | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

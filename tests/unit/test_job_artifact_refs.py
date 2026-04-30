@@ -19,7 +19,11 @@ from backend.job_artifact_refs import (
     project_active_jobs,
     project_artifact_refs,
 )
-from backend.models import ActiveJobRecord, ArtifactRefRecord
+from backend.models import (
+    ActiveJobRecord,
+    ArtifactRefRecord,
+    canonical_artifact_ref_uri,
+)
 
 
 def test_generate_ids_return_unique_values_with_stable_prefixes():
@@ -68,6 +72,11 @@ def make_artifact_ref(**overrides) -> ArtifactRefRecord:
         "source_job_id": "active-job-1",
         "path": "/tmp/model.pt",
         "uri": "file:///tmp/model.pt",
+        "locator": {
+            "type": "local_path",
+            "path": "/tmp/model.pt",
+            "uri": "file:///tmp/model.pt",
+        },
         "digest": "sha256:model",
         "label": "Best checkpoint",
         "metadata": {"epoch": 3},
@@ -76,6 +85,10 @@ def make_artifact_ref(**overrides) -> ArtifactRefRecord:
         "created_at": "2026-04-29T10:10:00Z",
     }
     values.update(overrides)
+    values.setdefault(
+        "ref_uri",
+        canonical_artifact_ref_uri(values["session_id"], values["artifact_id"]),
+    )
     return ArtifactRefRecord.model_validate(values)
 
 
@@ -129,55 +142,64 @@ def test_payloads_round_trip_from_records():
 
 
 @pytest.mark.parametrize(
-    ("source", "ref_uri", "locator"),
+    ("source", "locator", "compat_uri"),
     [
         (
             "local_path",
+            {
+                "type": "local_path",
+                "path": "/tmp/model.pt",
+                "uri": "file:///tmp/model.pt",
+            },
             "file:///tmp/model.pt",
-            {"type": "local_path", "path": "/tmp/model.pt"},
         ),
         (
             "sandbox",
-            "sandbox://sbx-1/artifacts/model.pt",
             {
                 "type": "sandbox",
                 "sandbox_id": "sbx-1",
                 "path": "/artifacts/model.pt",
+                "uri": "sandbox://sbx-1/artifacts/model.pt",
             },
+            "sandbox://sbx-1/artifacts/model.pt",
         ),
         (
             "hf_hub",
-            "hf://model/org/model/resolve/main/model.safetensors",
             {
                 "type": "hf_hub",
                 "repo_id": "org/model",
                 "repo_type": "model",
                 "revision": "main",
                 "path": "model.safetensors",
+                "uri": "hf://model/org/model/resolve/main/model.safetensors",
             },
+            "hf://model/org/model/resolve/main/model.safetensors",
         ),
         (
             "remote_uri",
-            "https://artifacts.example/model.pt",
             {"type": "remote_uri", "uri": "https://artifacts.example/model.pt"},
+            "https://artifacts.example/model.pt",
         ),
         (
             "event_ref",
-            "event://event-artifact/4",
             {"type": "event_ref", "event_id": "event-artifact", "sequence": 4},
+            "event://session-a/4#/data/artifacts/0",
         ),
     ],
 )
 def test_artifact_ref_schema_metadata_round_trips_for_locator_sources(
     source,
-    ref_uri,
     locator,
+    compat_uri,
 ):
+    artifact_id = f"artifact-{source}"
+    ref_uri = canonical_artifact_ref_uri("session-a", artifact_id)
     record = make_artifact_ref(
-        artifact_id=f"artifact-{source}",
+        artifact_id=artifact_id,
         source=source,
         ref_uri=ref_uri,
         locator=locator,
+        uri=compat_uri,
         lifecycle="available",
         mime_type="application/octet-stream",
         size_bytes=1024,
@@ -198,10 +220,82 @@ def test_artifact_ref_schema_metadata_round_trips_for_locator_sources(
     assert ArtifactRefRecord.model_validate(payload) == record
     assert artifact_ref_record_from_event(event) == record
     assert event.data["ref_uri"] == ref_uri
+    assert event.data["ref_uri"].startswith("mlj-artifact://session/")
+    assert event.data["ref_uri"] != compat_uri
+    assert event.data["uri"] == compat_uri
     assert event.data["locator"]["type"] == locator["type"]
     assert event.data["lifecycle"] == "available"
     assert event.data["mime_type"] == "application/octet-stream"
     assert event.data["size_bytes"] == 1024
+
+
+def test_legacy_artifact_ref_without_ref_uri_still_validates():
+    record = make_artifact_ref(
+        artifact_id="artifact-legacy",
+        ref_uri=None,
+        source="remote_uri",
+        path=None,
+        uri="https://artifacts.example/legacy-model.pt",
+        locator={
+            "type": "remote_uri",
+            "uri": "https://artifacts.example/legacy-model.pt",
+        },
+    )
+    event = make_artifact_ref_event(record)
+
+    assert record.ref_uri is None
+    assert (
+        ArtifactRefRecord.model_validate(artifact_ref_recorded_payload(record))
+        == record
+    )
+    assert artifact_ref_record_from_event(event) == record
+
+
+@pytest.mark.parametrize(
+    ("source", "legacy_ref_uri", "locator"),
+    [
+        (
+            "local_path",
+            "file:///tmp/model.pt",
+            {"type": "local_path", "path": "/tmp/model.pt"},
+        ),
+        (
+            "hf_hub",
+            "hf://model/org/model/resolve/main/model.safetensors",
+            {"type": "hf_hub", "repo_id": "org/model", "repo_type": "model"},
+        ),
+        (
+            "remote_uri",
+            "https://artifacts.example/model.pt",
+            {"type": "remote_uri", "uri": "https://artifacts.example/model.pt"},
+        ),
+        (
+            "event_ref",
+            "event://session-a/4#/data/artifacts/0",
+            {"type": "event_ref", "event_id": "event-artifact", "sequence": 4},
+        ),
+    ],
+)
+def test_legacy_external_ref_uri_values_still_validate(
+    source: str,
+    legacy_ref_uri: str,
+    locator: dict[str, object],
+):
+    record = make_artifact_ref(
+        artifact_id=f"artifact-legacy-{source}",
+        ref_uri=legacy_ref_uri,
+        source=source,
+        locator=locator,
+        uri=legacy_ref_uri,
+    )
+    event = make_artifact_ref_event(record)
+
+    assert record.ref_uri == legacy_ref_uri
+    assert (
+        ArtifactRefRecord.model_validate(artifact_ref_recorded_payload(record))
+        == record
+    )
+    assert artifact_ref_record_from_event(event) == record
 
 
 def test_event_to_record_validation_rejects_wrong_type_and_session_mismatch():
@@ -336,7 +430,7 @@ def test_sqlite_store_appends_lists_redacts_and_rejects_duplicate_rows(tmp_path)
         source_event_sequence=20,
         path="/Users/alice/project/model.pt",
         uri=f"https://example.test/artifacts/1?token={secret}",
-        ref_uri=f"https://example.test/refs/1?token={secret}",
+        ref_uri=canonical_artifact_ref_uri("session-a", "artifact-store"),
         locator={
             "type": "remote_uri",
             "uri": f"https://example.test/locators/1?token={secret}",
@@ -365,9 +459,8 @@ def test_sqlite_store_appends_lists_redacts_and_rejects_duplicate_rows(tmp_path)
     assert created_artifact.metadata["api_key"] == "[REDACTED]"
     assert created_artifact.path == "/Users/[USER]/project/model.pt"
     assert created_artifact.uri == "https://example.test/artifacts/1?token=[REDACTED]"
-    assert (
-        created_artifact.ref_uri
-        == "https://example.test/refs/1?token=[REDACTED]"
+    assert created_artifact.ref_uri == (
+        "mlj-artifact://session/session-a/artifact-store"
     )
     assert created_artifact.locator is not None
     assert (
