@@ -13,6 +13,7 @@ from backend.flow_templates import (
     get_builtin_flow_template,
     load_flow_template,
     list_builtin_flow_templates,
+    list_flow_template_sources,
     list_flow_templates,
     parse_flow_template,
 )
@@ -38,6 +39,49 @@ EXPECTED_BUILTIN_IDS = [
     "publish-to-hub",
     "rag-evaluation",
     "reproduce-paper",
+]
+EXPECTED_FLOW_SOURCE_DESCRIPTORS = [
+    {
+        "kind": "builtin",
+        "label": "Built-in",
+        "availability": "available",
+        "trust_status": "trusted",
+        "loading_status": "enabled",
+        "template_count": len(EXPECTED_BUILTIN_IDS),
+        "read_only": True,
+        "supports_upload": False,
+        "supports_remote_fetch": False,
+        "source_path": "backend/builtin_flow_templates",
+        "description": "Bundled templates loaded from the backend package only.",
+    },
+    {
+        "kind": "custom",
+        "label": "Custom",
+        "availability": "reserved",
+        "trust_status": "untrusted",
+        "loading_status": "disabled",
+        "template_count": 0,
+        "read_only": True,
+        "supports_upload": False,
+        "supports_remote_fetch": False,
+        "source_path": None,
+        "description": "Reserved for user-provided templates; loading is disabled.",
+    },
+    {
+        "kind": "community",
+        "label": "Community",
+        "availability": "reserved",
+        "trust_status": "untrusted",
+        "loading_status": "disabled",
+        "template_count": 0,
+        "read_only": True,
+        "supports_upload": False,
+        "supports_remote_fetch": False,
+        "source_path": None,
+        "description": (
+            "Reserved for curated shared templates; remote fetch is disabled."
+        ),
+    },
 ]
 
 
@@ -182,6 +226,31 @@ def test_flow_template_source_filter_rejects_unsupported_sources() -> None:
         match="Unsupported flow template source 'remote'",
     ):
         list_flow_templates("remote")
+
+
+def test_flow_template_source_descriptors_are_stable_and_read_only() -> None:
+    sources = list_flow_template_sources()
+
+    assert sources == EXPECTED_FLOW_SOURCE_DESCRIPTORS
+    assert [source["kind"] for source in sources] == [
+        "builtin",
+        "custom",
+        "community",
+    ]
+
+    reserved_sources = [
+        source for source in sources if source["availability"] == "reserved"
+    ]
+    assert {source["kind"] for source in reserved_sources} == {
+        "custom",
+        "community",
+    }
+    for source in reserved_sources:
+        assert source["template_count"] == 0
+        assert source["loading_status"] == "disabled"
+        assert source["source_path"] is None
+        assert source["supports_upload"] is False
+        assert source["supports_remote_fetch"] is False
 
 
 @pytest.mark.parametrize("template_id", EXPECTED_BUILTIN_IDS)

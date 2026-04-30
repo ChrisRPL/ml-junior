@@ -282,6 +282,58 @@ def list_flow_templates(source: str | None = None) -> list[FlowTemplate]:
     return []
 
 
+def list_flow_template_sources() -> list[dict[str, Any]]:
+    """Return stable read-only metadata for supported template sources."""
+    builtin_count = len(_builtin_template_paths())
+    return [
+        {
+            "kind": "builtin",
+            "label": "Built-in",
+            "availability": "available",
+            "trust_status": "trusted",
+            "loading_status": "enabled",
+            "template_count": builtin_count,
+            "read_only": True,
+            "supports_upload": False,
+            "supports_remote_fetch": False,
+            "source_path": _builtin_template_source_dir(),
+            "description": (
+                "Bundled templates loaded from the backend package only."
+            ),
+        },
+        {
+            "kind": "custom",
+            "label": "Custom",
+            "availability": "reserved",
+            "trust_status": "untrusted",
+            "loading_status": "disabled",
+            "template_count": 0,
+            "read_only": True,
+            "supports_upload": False,
+            "supports_remote_fetch": False,
+            "source_path": None,
+            "description": (
+                "Reserved for user-provided templates; loading is disabled."
+            ),
+        },
+        {
+            "kind": "community",
+            "label": "Community",
+            "availability": "reserved",
+            "trust_status": "untrusted",
+            "loading_status": "disabled",
+            "template_count": 0,
+            "read_only": True,
+            "supports_upload": False,
+            "supports_remote_fetch": False,
+            "source_path": None,
+            "description": (
+                "Reserved for curated shared templates; remote fetch is disabled."
+            ),
+        },
+    ]
+
+
 def get_builtin_flow_template(template_id: str) -> FlowTemplate:
     """Load one built-in flow template by id."""
     path = _builtin_template_path(template_id)
@@ -461,6 +513,14 @@ def _template_source_metadata(template: FlowTemplate) -> dict[str, str]:
 
 def _builtin_template_source_path(template_id: str) -> str:
     path = BUILTIN_FLOW_TEMPLATE_DIR / f"{template_id}.json"
+    return _relative_backend_path(path)
+
+
+def _builtin_template_source_dir() -> str:
+    return _relative_backend_path(BUILTIN_FLOW_TEMPLATE_DIR)
+
+
+def _relative_backend_path(path: Path) -> str:
     try:
         relative_path = path.relative_to(Path(__file__).resolve().parent.parent)
     except ValueError:
@@ -607,6 +667,7 @@ __all__ = [
     "get_builtin_flow_template",
     "load_flow_template",
     "list_builtin_flow_templates",
+    "list_flow_template_sources",
     "list_flow_templates",
     "parse_flow_template",
 ]

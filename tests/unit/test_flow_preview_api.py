@@ -27,6 +27,49 @@ EXPECTED_BUILTIN_IDS = [
     "rag-evaluation",
     "reproduce-paper",
 ]
+EXPECTED_FLOW_SOURCE_DESCRIPTORS = [
+    {
+        "kind": "builtin",
+        "label": "Built-in",
+        "availability": "available",
+        "trust_status": "trusted",
+        "loading_status": "enabled",
+        "template_count": len(EXPECTED_BUILTIN_IDS),
+        "read_only": True,
+        "supports_upload": False,
+        "supports_remote_fetch": False,
+        "source_path": "backend/builtin_flow_templates",
+        "description": "Bundled templates loaded from the backend package only.",
+    },
+    {
+        "kind": "custom",
+        "label": "Custom",
+        "availability": "reserved",
+        "trust_status": "untrusted",
+        "loading_status": "disabled",
+        "template_count": 0,
+        "read_only": True,
+        "supports_upload": False,
+        "supports_remote_fetch": False,
+        "source_path": None,
+        "description": "Reserved for user-provided templates; loading is disabled.",
+    },
+    {
+        "kind": "community",
+        "label": "Community",
+        "availability": "reserved",
+        "trust_status": "untrusted",
+        "loading_status": "disabled",
+        "template_count": 0,
+        "read_only": True,
+        "supports_upload": False,
+        "supports_remote_fetch": False,
+        "source_path": None,
+        "description": (
+            "Reserved for curated shared templates; remote fetch is disabled."
+        ),
+    },
+]
 
 
 async def test_flow_catalog_route_lists_every_builtin_without_session_runtime(
@@ -87,6 +130,22 @@ async def test_flow_catalog_route_rejects_unsupported_sources() -> None:
             "supported sources: builtin, custom, community"
         ),
     }
+
+
+async def test_flow_sources_route_returns_stable_read_only_source_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(agent_routes, "session_manager", object())
+
+    sources = await agent_routes.list_flow_sources({"user_id": "dev"})
+    payload = [source.model_dump() for source in sources]
+
+    assert any(
+        route.path == "/api/flow-sources"
+        and "GET" in route.methods
+        for route in agent_routes.router.routes
+    )
+    assert payload == EXPECTED_FLOW_SOURCE_DESCRIPTORS
 
 
 @pytest.mark.parametrize("template_id", EXPECTED_BUILTIN_IDS)

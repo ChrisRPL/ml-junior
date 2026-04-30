@@ -641,6 +641,25 @@ class FlowTemplateMetadata(BaseModel):
 
 
 FlowTemplateSourceKind = Literal["builtin", "custom", "community"]
+FlowTemplateSourceAvailability = Literal["available", "reserved"]
+FlowTemplateSourceTrustStatus = Literal["trusted", "untrusted"]
+FlowTemplateSourceLoadingStatus = Literal["enabled", "disabled"]
+
+
+class FlowTemplateSourceDescriptor(BaseModel):
+    """Read-only descriptor for one flow template source."""
+
+    kind: FlowTemplateSourceKind
+    label: str
+    availability: FlowTemplateSourceAvailability
+    trust_status: FlowTemplateSourceTrustStatus
+    loading_status: FlowTemplateSourceLoadingStatus
+    template_count: int = Field(ge=0)
+    read_only: bool
+    supports_upload: bool
+    supports_remote_fetch: bool
+    source_path: str | None = None
+    description: str
 
 
 class FlowTemplateSourceMetadata(BaseModel):

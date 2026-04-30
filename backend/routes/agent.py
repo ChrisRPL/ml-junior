@@ -23,6 +23,7 @@ from models import (
     ApprovalRequest,
     FlowCatalogItem,
     FlowPreviewResponse,
+    FlowTemplateSourceDescriptor,
     HealthResponse,
     LLMHealthResponse,
     OperationResponse,
@@ -38,6 +39,7 @@ from backend.flow_templates import (
     build_flow_catalog_item,
     build_flow_preview,
     get_builtin_flow_template,
+    list_flow_template_sources,
     list_flow_templates,
 )
 from session_manager import (
@@ -300,6 +302,17 @@ async def list_flows(
     return [
         FlowCatalogItem(**build_flow_catalog_item(template))
         for template in templates
+    ]
+
+
+@router.get("/flow-sources", response_model=list[FlowTemplateSourceDescriptor])
+async def list_flow_sources(
+    _user: dict = Depends(get_current_user),
+) -> list[FlowTemplateSourceDescriptor]:
+    """Return read-only flow template source descriptors."""
+    return [
+        FlowTemplateSourceDescriptor(**source)
+        for source in list_flow_template_sources()
     ]
 
 
