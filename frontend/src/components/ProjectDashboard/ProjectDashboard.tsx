@@ -2,7 +2,6 @@ import {
   Alert,
   Box,
   Chip,
-  Divider,
   Link,
   Stack,
   Typography,
@@ -26,6 +25,7 @@ import type {
   ProjectSnapshot,
 } from '@/types/project';
 import type { SessionMeta } from '@/types/agent';
+import EvidenceLedgerPanel from './EvidenceLedgerPanel';
 import FlowCatalogPanel from './FlowCatalogPanel';
 import {
   alertSx,
@@ -86,11 +86,6 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
 
   const warnings = snapshot.compatibility.warnings ?? [];
   const stale = snapshot.compatibility.stale || snapshot.resume.stale_snapshot || snapshot.status === 'stale';
-  const verifierTone = snapshot.evidence_summary.status === 'verified'
-    ? 'good'
-    : snapshot.evidence_summary.status === 'failed'
-      ? 'risk'
-      : 'muted';
 
   return (
     <DashboardFrame>
@@ -174,27 +169,7 @@ export default function ProjectDashboard({ snapshot, activeSession }: ProjectDas
           </Panel>
 
           <Panel title="Evidence and artifacts" icon={<TaskAltOutlinedIcon />}>
-            <Box sx={{ display: 'flex', gap: 1.25, alignItems: 'center' }}>
-              <Box component="img" src={terminalAssets.evidence} alt="" sx={{ width: 58, display: { xs: 'none', sm: 'block' }, opacity: 0.82 }} />
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', rowGap: 0.75, mb: 0.75 }}>
-                  <ToneChip label={`${snapshot.evidence_summary.artifact_count} artifacts`} tone="blue" />
-                  <ToneChip label={`${snapshot.evidence_summary.metric_count} metrics`} tone="good" />
-                  <ToneChip label={`${snapshot.evidence_summary.claim_count} claims`} tone={verifierTone} />
-                </Stack>
-                <Typography variant="body2" sx={{ color: 'var(--muted-text)' }}>
-                  Verifier: {humanize(snapshot.evidence_summary.status)}.
-                </Typography>
-              </Box>
-            </Box>
-            <Divider sx={{ my: 1.25 }} />
-            {snapshot.evidence_summary.items.length > 0
-              ? snapshot.evidence_summary.items.slice(0, 4).map((item, index) => (
-                  <Typography key={index} variant="caption" sx={monoLineSx}>
-                    {formatUnknown(item)}
-                  </Typography>
-                ))
-              : <Placeholder text="No evidence yet." compact />}
+            <EvidenceLedgerPanel summary={snapshot.evidence_summary} />
           </Panel>
 
           <Panel title="Budget and tracking" icon={<PlayArrowOutlinedIcon />}>
@@ -407,14 +382,4 @@ function formatBudget(snapshot: ProjectSnapshot) {
 
 function formatSource(source: string) {
   return source === 'placeholder' ? 'not tracked' : humanize(source);
-}
-
-function formatUnknown(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return 'unrenderable evidence item';
-  }
 }
