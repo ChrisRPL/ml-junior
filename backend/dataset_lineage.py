@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -9,12 +10,106 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 DatasetFileChangeType = Literal["added", "removed", "modified", "unchanged"]
+DatasetLineageNodeKind = Literal["transform", "filter", "augment", "merge"]
 
 
 class DatasetLineageModel(BaseModel):
     """Closed-schema base for inert caller-supplied dataset lineage records."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class DatasetLineageRef(DatasetLineageModel):
+    """Reference to an inert lineage graph, optionally narrowed to one node."""
+
+    lineage_id: NonEmptyStr
+    node_id: NonEmptyStr | None = None
+
+
+class DatasetLineageNodeRef(DatasetLineageModel):
+    """Reference to a parent node inside the same lineage graph."""
+
+    node_id: NonEmptyStr
+
+
+class DatasetLineageManifestRef(DatasetLineageModel):
+    """Reference to a caller-supplied manifest without reading dataset files."""
+
+    manifest_id: NonEmptyStr
+
+
+class DatasetLineageDiffRef(DatasetLineageModel):
+    """Reference to a caller-supplied manifest diff by its manifest endpoints."""
+
+    before_manifest_id: NonEmptyStr
+    after_manifest_id: NonEmptyStr
+
+
+class DatasetLineageNode(DatasetLineageModel):
+    """One inert operation node in a caller-supplied dataset lineage DAG."""
+
+    node_id: NonEmptyStr
+    kind: DatasetLineageNodeKind
+    parent_refs: list[DatasetLineageNodeRef] = Field(default_factory=list)
+    input_manifest_refs: list[DatasetLineageManifestRef] = Field(default_factory=list)
+    output_manifest_refs: list[DatasetLineageManifestRef] = Field(default_factory=list)
+    diff_refs: list[DatasetLineageDiffRef] = Field(default_factory=list)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _reject_duplicate_parent_refs(self) -> Self:
+        duplicates = _duplicate_values(ref.node_id for ref in self.parent_refs)
+        if duplicates:
+            refs = ", ".join(duplicates)
+            raise ValueError(
+                f"dataset lineage node {self.node_id} contains duplicate "
+                f"parent refs: {refs}"
+            )
+        return self
+
+
+class DatasetLineageGraph(DatasetLineageModel):
+    """Closed inert DAG schema for caller-supplied dataset lineage."""
+
+    lineage_id: NonEmptyStr
+    nodes: list[DatasetLineageNode] = Field(default_factory=list)
+    manifest_refs: list[DatasetLineageManifestRef] = Field(default_factory=list)
+    diff_refs: list[DatasetLineageDiffRef] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_node_ids_and_parent_graph(self) -> Self:
+        duplicates = _duplicate_values(node.node_id for node in self.nodes)
+        if duplicates:
+            ids = ", ".join(duplicates)
+            raise ValueError(
+                f"dataset lineage graph contains duplicate node ids: {ids}"
+            )
+
+        nodes_by_id = {node.node_id: node for node in self.nodes}
+        unknown_refs: list[tuple[str, str]] = []
+        for node in self.nodes:
+            for parent_ref in node.parent_refs:
+                if parent_ref.node_id not in nodes_by_id:
+                    unknown_refs.append((node.node_id, parent_ref.node_id))
+        if unknown_refs:
+            refs = ", ".join(
+                f"{child}->{parent}" for child, parent in sorted(unknown_refs)
+            )
+            raise ValueError(
+                f"dataset lineage graph contains unknown parent refs: {refs}"
+            )
+
+        parent_ids_by_node = {
+            node.node_id: [ref.node_id for ref in node.parent_refs]
+            for node in self.nodes
+        }
+        cycle = _find_lineage_cycle(parent_ids_by_node)
+        if cycle:
+            path = " -> ".join(cycle)
+            raise ValueError(f"dataset lineage graph contains cycle: {path}")
+        return self
 
 
 class DatasetExamplePolicy(DatasetLineageModel):
@@ -42,6 +137,7 @@ class DatasetManifest(DatasetLineageModel):
     manifest_id: NonEmptyStr
     dataset_id: NonEmptyStr | None = None
     snapshot_id: NonEmptyStr | None = None
+    lineage_refs: list[DatasetLineageRef] = Field(default_factory=list)
     source: Literal["caller_supplied"] = "caller_supplied"
     files: list[DatasetManifestFile] = Field(default_factory=list)
     privacy_class: Literal["public", "private", "sensitive", "unknown"] = "unknown"
@@ -276,10 +372,59 @@ def _total_size(files: list[DatasetManifestFile]) -> int:
     return sum(file.size_bytes for file in files)
 
 
+def _duplicate_values(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    return sorted(duplicates)
+
+
+def _find_lineage_cycle(
+    parent_ids_by_node: dict[str, list[str]],
+) -> list[str] | None:
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    stack: list[str] = []
+
+    def visit(node_id: str) -> list[str] | None:
+        if node_id in visiting:
+            cycle_start = stack.index(node_id)
+            return stack[cycle_start:] + [node_id]
+        if node_id in visited:
+            return None
+
+        visiting.add(node_id)
+        stack.append(node_id)
+        for parent_id in sorted(parent_ids_by_node[node_id]):
+            cycle = visit(parent_id)
+            if cycle:
+                return cycle
+        stack.pop()
+        visiting.remove(node_id)
+        visited.add(node_id)
+        return None
+
+    for node_id in sorted(parent_ids_by_node):
+        cycle = visit(node_id)
+        if cycle:
+            return cycle
+    return None
+
+
 __all__ = [
     "DatasetExamplePolicy",
     "DatasetFileChangeType",
+    "DatasetLineageDiffRef",
+    "DatasetLineageGraph",
+    "DatasetLineageManifestRef",
     "DatasetLineageModel",
+    "DatasetLineageNode",
+    "DatasetLineageNodeKind",
+    "DatasetLineageNodeRef",
+    "DatasetLineageRef",
     "DatasetManifest",
     "DatasetManifestChangeStats",
     "DatasetManifestDiff",

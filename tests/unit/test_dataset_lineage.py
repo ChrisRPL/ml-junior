@@ -5,6 +5,9 @@ from pydantic import ValidationError
 
 from backend.dataset_lineage import (
     DatasetExamplePolicy,
+    DatasetLineageGraph,
+    DatasetLineageNode,
+    DatasetLineageRef,
     DatasetManifest,
     DatasetManifestChangeStats,
     DatasetManifestDiff,
@@ -86,6 +89,175 @@ def test_manifest_rejects_duplicate_paths():
                 make_file("data.jsonl", size_bytes=1, digest="sha256:a"),
                 make_file("data.jsonl", size_bytes=2, digest="sha256:b"),
             ],
+        )
+
+
+def test_manifest_can_reference_inert_lineage_ids():
+    manifest = make_manifest(
+        "manifest-a",
+        [make_file("train.jsonl", size_bytes=10)],
+        lineage_refs=[
+            {
+                "lineage_id": "lineage-a",
+                "node_id": "filter-train",
+            }
+        ],
+    )
+
+    assert manifest.lineage_refs == [
+        DatasetLineageRef(lineage_id="lineage-a", node_id="filter-train")
+    ]
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        DatasetLineageRef.model_validate(
+            {
+                "lineage_id": "lineage-a",
+                "producer": "runtime-job",
+            }
+        )
+
+
+def test_lineage_graph_supports_closed_transform_filter_augment_merge_nodes():
+    graph = DatasetLineageGraph.model_validate(
+        {
+            "lineage_id": "lineage-a",
+            "manifest_refs": [{"manifest_id": "manifest-raw"}],
+            "diff_refs": [
+                {
+                    "before_manifest_id": "manifest-raw",
+                    "after_manifest_id": "manifest-clean",
+                }
+            ],
+            "nodes": [
+                {
+                    "node_id": "transform-raw",
+                    "kind": "transform",
+                    "input_manifest_refs": [{"manifest_id": "manifest-raw"}],
+                    "output_manifest_refs": [{"manifest_id": "manifest-shaped"}],
+                    "parameters": {"columns": ["text", "label"]},
+                },
+                {
+                    "node_id": "filter-train",
+                    "kind": "filter",
+                    "parent_refs": [{"node_id": "transform-raw"}],
+                    "output_manifest_refs": [{"manifest_id": "manifest-clean"}],
+                },
+                {
+                    "node_id": "augment-train",
+                    "kind": "augment",
+                    "parent_refs": [{"node_id": "filter-train"}],
+                },
+                {
+                    "node_id": "merge-train",
+                    "kind": "merge",
+                    "parent_refs": [
+                        {"node_id": "filter-train"},
+                        {"node_id": "augment-train"},
+                    ],
+                },
+            ],
+        }
+    )
+
+    assert graph.lineage_id == "lineage-a"
+    assert [node.kind for node in graph.nodes] == [
+        "transform",
+        "filter",
+        "augment",
+        "merge",
+    ]
+    assert graph.nodes[0].input_manifest_refs[0].manifest_id == "manifest-raw"
+    assert graph.diff_refs[0].after_manifest_id == "manifest-clean"
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        DatasetLineageNode.model_validate(
+            {
+                "node_id": "extra-node",
+                "kind": "transform",
+                "producer": "runtime-job",
+            }
+        )
+
+
+def test_lineage_graph_rejects_duplicate_node_ids_deterministically():
+    with pytest.raises(ValidationError, match="duplicate node ids: a-node"):
+        DatasetLineageGraph.model_validate(
+            {
+                "lineage_id": "lineage-a",
+                "nodes": [
+                    {"node_id": "a-node", "kind": "transform"},
+                    {"node_id": "b-node", "kind": "filter"},
+                    {"node_id": "a-node", "kind": "augment"},
+                ],
+            }
+        )
+
+
+def test_lineage_nodes_reject_duplicate_parent_refs_deterministically():
+    with pytest.raises(ValidationError, match="duplicate parent refs: parent-a"):
+        DatasetLineageNode.model_validate(
+            {
+                "node_id": "child",
+                "kind": "merge",
+                "parent_refs": [
+                    {"node_id": "parent-a"},
+                    {"node_id": "parent-b"},
+                    {"node_id": "parent-a"},
+                ],
+            }
+        )
+
+
+def test_lineage_graph_rejects_unknown_parent_refs_deterministically():
+    with pytest.raises(
+        ValidationError,
+        match=r"unknown parent refs: child-a->missing-a, child-b->missing-b",
+    ):
+        DatasetLineageGraph.model_validate(
+            {
+                "lineage_id": "lineage-a",
+                "nodes": [
+                    {
+                        "node_id": "child-b",
+                        "kind": "filter",
+                        "parent_refs": [{"node_id": "missing-b"}],
+                    },
+                    {
+                        "node_id": "child-a",
+                        "kind": "transform",
+                        "parent_refs": [{"node_id": "missing-a"}],
+                    },
+                ],
+            }
+        )
+
+
+def test_lineage_graph_rejects_cycles_deterministically():
+    with pytest.raises(
+        ValidationError,
+        match=r"contains cycle: augment-a -> filter-a -> transform-a -> augment-a",
+    ):
+        DatasetLineageGraph.model_validate(
+            {
+                "lineage_id": "lineage-a",
+                "nodes": [
+                    {
+                        "node_id": "transform-a",
+                        "kind": "transform",
+                        "parent_refs": [{"node_id": "augment-a"}],
+                    },
+                    {
+                        "node_id": "filter-a",
+                        "kind": "filter",
+                        "parent_refs": [{"node_id": "transform-a"}],
+                    },
+                    {
+                        "node_id": "augment-a",
+                        "kind": "augment",
+                        "parent_refs": [{"node_id": "filter-a"}],
+                    },
+                ],
+            }
         )
 
 
