@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from agent.core.events import AgentEvent
@@ -7,6 +9,7 @@ from backend.job_artifact_refs import (
     ACTIVE_JOB_RECORDED_EVENT,
     ARTIFACT_REF_RECORDED_EVENT,
     JobArtifactRefError,
+    SQLiteJobArtifactRefStore,
     active_job_record_from_event,
     active_job_recorded_payload,
     artifact_ref_record_from_event,
@@ -225,3 +228,139 @@ def test_artifact_projection_filters_orders_and_dedupes_latest_refs():
         "artifact-1",
     ]
     assert [record.label for record in projected] == ["Metrics", "Final checkpoint"]
+
+
+def test_sqlite_store_appends_lists_redacts_and_rejects_duplicate_rows(tmp_path):
+    database_path = tmp_path / "job-artifact-refs.sqlite"
+    store = SQLiteJobArtifactRefStore(database_path)
+    secret = "hf_jobartifactsecret123456789"
+    first_job = make_active_job(
+        job_id="active-job-store",
+        source_event_sequence=10,
+        status="queued",
+        metadata={
+            "token": secret,
+            "note": f"Authorization: Bearer {secret}",
+        },
+        redaction_status="none",
+    )
+    job_update = make_active_job(
+        job_id="active-job-store",
+        source_event_sequence=11,
+        status="running",
+        metadata={"queue": "gpu"},
+    )
+    other_session_job = make_active_job(
+        session_id="session-b",
+        job_id="active-job-other",
+        source_event_sequence=12,
+    )
+    first_artifact = make_artifact_ref(
+        artifact_id="artifact-store",
+        source_event_sequence=20,
+        path="/Users/alice/project/model.pt",
+        uri=f"https://example.test/artifacts/1?token={secret}",
+        metadata={"api_key": secret},
+        redaction_status="none",
+    )
+    artifact_update = make_artifact_ref(
+        artifact_id="artifact-store",
+        source_event_sequence=21,
+        label="Updated checkpoint",
+    )
+
+    created_job = store.append_active_job(first_job)
+    store.append_active_job(job_update)
+    store.append_active_job(other_session_job)
+    created_artifact = store.append_artifact_ref(first_artifact)
+    store.append_artifact_ref(artifact_update)
+
+    assert created_job.redaction_status == "redacted"
+    assert created_job.metadata["token"] == "[REDACTED]"
+    assert secret not in str(created_job.model_dump())
+    assert created_artifact.redaction_status == "redacted"
+    assert created_artifact.metadata["api_key"] == "[REDACTED]"
+    assert created_artifact.path == "/Users/[USER]/project/model.pt"
+    assert created_artifact.uri == "https://example.test/artifacts/1?token=[REDACTED]"
+    assert secret not in str(created_artifact.model_dump())
+
+    assert [
+        (record.job_id, record.source_event_sequence, record.status)
+        for record in store.list_active_jobs("session-a")
+    ] == [
+        ("active-job-store", 10, "queued"),
+        ("active-job-store", 11, "running"),
+    ]
+    assert store.list_active_jobs("session-a", limit=1) == [created_job]
+    assert [record.job_id for record in store.list_active_jobs("session-b")] == [
+        "active-job-other"
+    ]
+    assert [
+        (record.artifact_id, record.source_event_sequence, record.label)
+        for record in store.list_artifact_refs("session-a")
+    ] == [
+        ("artifact-store", 20, "Best checkpoint"),
+        ("artifact-store", 21, "Updated checkpoint"),
+    ]
+    assert store.list_artifact_refs("session-a", limit=1) == [created_artifact]
+
+    with pytest.raises(JobArtifactRefError, match="already exists"):
+        store.append_active_job(first_job)
+    with pytest.raises(JobArtifactRefError, match="already exists"):
+        store.append_artifact_ref(first_artifact)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        database_dump = "\n".join(connection.iterdump())
+    finally:
+        connection.close()
+
+    assert secret not in database_dump
+    assert "[REDACTED]" in database_dump
+
+
+def test_sqlite_store_rejects_duplicate_rows_without_source_event_sequence(tmp_path):
+    store = SQLiteJobArtifactRefStore(tmp_path / "job-artifact-refs.sqlite")
+    job = make_active_job(
+        job_id="active-job-no-sequence",
+        source_event_sequence=None,
+    )
+    artifact = make_artifact_ref(
+        artifact_id="artifact-no-sequence",
+        source_event_sequence=None,
+    )
+
+    store.append_active_job(job)
+    store.append_artifact_ref(artifact)
+
+    with pytest.raises(JobArtifactRefError, match="already exists"):
+        store.append_active_job(job)
+    with pytest.raises(JobArtifactRefError, match="already exists"):
+        store.append_artifact_ref(artifact)
+
+
+def test_sqlite_store_rejects_negative_limits(tmp_path):
+    store = SQLiteJobArtifactRefStore(tmp_path / "job-artifact-refs.sqlite")
+
+    with pytest.raises(JobArtifactRefError, match="limit"):
+        store.list_active_jobs("session-a", limit=-1)
+    with pytest.raises(JobArtifactRefError, match="limit"):
+        store.list_artifact_refs("session-a", limit=-1)
+
+
+def test_sqlite_store_owns_only_job_artifact_ref_tables(tmp_path):
+    database_path = tmp_path / "job-artifact-refs.sqlite"
+    SQLiteJobArtifactRefStore(database_path).close()
+
+    connection = sqlite3.connect(database_path)
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    finally:
+        connection.close()
+
+    assert tables == {"active_job_records", "artifact_ref_records"}
