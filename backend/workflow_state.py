@@ -14,6 +14,10 @@ from backend.experiment_ledger import project_log_refs, project_metrics
 from backend.job_artifact_refs import project_active_jobs, project_artifact_refs
 from backend.operation_store import OperationRecord
 from backend.session_store import SessionRecord
+from backend.verifier_ledger import (
+    VERIFIER_COMPLETED_EVENT,
+    verifier_verdict_record_from_event,
+)
 
 try:
     from models import (
@@ -112,6 +116,10 @@ def build_workflow_state(
     recorded_log_refs = _log_refs_from_events(session_id, unique_events)
     recorded_evidence_items = _evidence_items_from_events(session_id, unique_events)
     recorded_claim_links = _evidence_claim_links_from_events(session_id, unique_events)
+    recorded_verifier_verdicts = _verifier_verdicts_from_events(
+        session_id,
+        unique_events,
+    )
     phase_projection: PhaseState | None = None
     phase_started_at: dict[str, str | None] = {}
     phase_blockers: list[dict[str, Any]] = []
@@ -198,6 +206,7 @@ def build_workflow_state(
             log_refs=recorded_log_refs,
             evidence_items=recorded_evidence_items,
             claim_links=recorded_claim_links,
+            verifier_verdicts=recorded_verifier_verdicts,
         ),
         live_tracking_refs=[_live_tracking_placeholder(session_id)],
         resume=WorkflowResumeState(event_sequence=last_event_sequence),
@@ -554,7 +563,9 @@ def _evidence_items_from_events(
             record.model_dump(mode="json", exclude_none=True),
         )
 
-    return [record for _, record in sorted(latest.values(), key=lambda value: value[0])]
+    return [
+        record for _, record in sorted(latest.values(), key=lambda value: value[0])
+    ]
 
 
 def _evidence_claim_links_from_events(
@@ -573,7 +584,30 @@ def _evidence_claim_links_from_events(
             record.model_dump(mode="json", exclude_none=True),
         )
 
-    return [record for _, record in sorted(latest.values(), key=lambda value: value[0])]
+    return [
+        record for _, record in sorted(latest.values(), key=lambda value: value[0])
+    ]
+
+
+def _verifier_verdicts_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    latest: dict[str, tuple[tuple[int, str], dict[str, Any]]] = {}
+    for event in _ordered_session_events(
+        session_id,
+        events,
+        VERIFIER_COMPLETED_EVENT,
+    ):
+        record = verifier_verdict_record_from_event(event)
+        latest[record.verdict_id] = (
+            (event.sequence, str(event.id)),
+            record.model_dump(mode="json", exclude_none=True),
+        )
+
+    return [
+        record for _, record in sorted(latest.values(), key=lambda value: value[0])
+    ]
 
 
 def _ordered_session_events(
@@ -609,19 +643,27 @@ def _evidence_summary(
     log_refs: list[dict[str, Any]],
     evidence_items: list[dict[str, Any]],
     claim_links: list[dict[str, Any]],
+    verifier_verdicts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     if not artifact_refs and not metric_refs and not log_refs and not evidence_items:
-        if not claim_links:
+        if not claim_links and not verifier_verdicts:
             return _evidence_summary_placeholder()
 
     items = sorted(
-        [*artifact_refs, *metric_refs, *log_refs, *evidence_items, *claim_links],
+        [
+            *artifact_refs,
+            *metric_refs,
+            *log_refs,
+            *evidence_items,
+            *claim_links,
+            *verifier_verdicts,
+        ],
         key=_evidence_item_sort_key,
     )
     if not items:
         return _evidence_summary_placeholder()
 
-    return {
+    summary = {
         "source": "event",
         "status": "available",
         "claim_count": len(claim_links),
@@ -632,6 +674,33 @@ def _evidence_summary(
         "log_count": len(log_refs),
         "items": items,
     }
+    if verifier_verdicts:
+        summary["verifier_count"] = len(verifier_verdicts)
+        summary["verifier_counts"] = _verifier_verdict_counts(verifier_verdicts)
+        summary["verifier_status"] = _verifier_summary_status(verifier_verdicts)
+    return summary
+
+
+def _verifier_verdict_counts(
+    verifier_verdicts: list[dict[str, Any]],
+) -> dict[str, int]:
+    counts = {"passed": 0, "failed": 0, "inconclusive": 0}
+    for verdict in verifier_verdicts:
+        verdict_status = str(verdict.get("verdict") or "")
+        if verdict_status in counts:
+            counts[verdict_status] += 1
+    return counts
+
+
+def _verifier_summary_status(verifier_verdicts: list[dict[str, Any]]) -> str:
+    statuses = {str(verdict.get("verdict") or "") for verdict in verifier_verdicts}
+    if "failed" in statuses:
+        return "failed"
+    if "inconclusive" in statuses:
+        return "inconclusive"
+    if "passed" in statuses:
+        return "passed"
+    return "unknown"
 
 
 def _evidence_item_sort_key(item: dict[str, Any]) -> tuple[int, str]:

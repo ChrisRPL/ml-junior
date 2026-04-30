@@ -13,8 +13,13 @@ from backend.job_artifact_refs import (
     ACTIVE_JOB_RECORDED_EVENT,
     ARTIFACT_REF_RECORDED_EVENT,
 )
+from backend.models import VerifierVerdictRecord
 from backend.operation_store import OPERATION_RUNNING, SQLiteOperationStore
 from backend.session_store import SQLiteSessionStore
+from backend.verifier_ledger import (
+    VERIFIER_COMPLETED_EVENT,
+    verifier_completed_payload,
+)
 from backend.workflow_state import build_workflow_state
 import routes.agent as agent_routes
 import session_manager as session_module
@@ -227,7 +232,61 @@ def make_evidence_claim_link_recorded_event(
     ).model_copy(update={"id": event_id or f"event-{sequence}"})
 
 
+def make_verifier_completed_event(
+    *,
+    sequence: int,
+    verdict_id: str = "verdict-1",
+    verdict: str = "passed",
+    summary: str = "Claims have support.",
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    record = VerifierVerdictRecord.model_validate(
+        {
+            "session_id": session_id,
+            "verdict_id": verdict_id,
+            "verifier_id": "final-claims-have-evidence",
+            "source_event_sequence": source_event_sequence or sequence,
+            "verdict": verdict,
+            "scope": "final_answer",
+            "final_answer_ref": "final-answer-1",
+            "phase_id": "phase-report",
+            "run_id": "run-1",
+            "evidence_ids": ["evidence-1"],
+            "claim_ids": ["claim-1"],
+            "summary": summary,
+            "rationale": "Evidence supports the final claim.",
+            "checks": [
+                {
+                    "check_id": "check-1",
+                    "name": "Claim coverage",
+                    "status": (
+                        verdict
+                        if verdict in {"passed", "failed"}
+                        else "inconclusive"
+                    ),
+                    "summary": summary,
+                    "evidence_ids": ["evidence-1"],
+                    "metadata": {"claim_id": "claim-1"},
+                }
+            ],
+            "metadata": {"source": "synthetic-fixture"},
+            "redaction_status": "none",
+            "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        }
+    )
+    return make_event(
+        sequence=sequence,
+        event_type=VERIFIER_COMPLETED_EVENT,
+        session_id=session_id,
+        data=verifier_completed_payload(record),
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
 def _summary_item_id(item: dict) -> str | None:
+    if "verdict_id" in item:
+        return item.get("verdict_id")
     if "link_id" in item:
         return item.get("link_id")
     if "evidence_id" in item and "kind" in item:
@@ -510,6 +569,49 @@ def test_evidence_item_and_claim_link_recorded_project_into_evidence_summary():
     assert state.evidence_summary["items"][1]["link_id"] == "evidence-link-accuracy"
 
 
+def test_verifier_completed_projects_into_evidence_summary():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_evidence_item_recorded_event(sequence=1, evidence_id="evidence-1"),
+            make_verifier_completed_event(
+                sequence=2,
+                verdict_id="verdict-coverage",
+                verdict="passed",
+                summary="Coverage verified.",
+            ),
+            make_verifier_completed_event(
+                sequence=3,
+                verdict_id="verdict-risk",
+                verdict="inconclusive",
+                summary="Risk review needs more evidence.",
+            ),
+        ],
+    )
+
+    assert state.evidence_summary["source"] == "event"
+    assert state.evidence_summary["status"] == "available"
+    assert state.evidence_summary["verifier_count"] == 2
+    assert state.evidence_summary["verifier_counts"] == {
+        "passed": 1,
+        "failed": 0,
+        "inconclusive": 1,
+    }
+    assert state.evidence_summary["verifier_status"] == "inconclusive"
+    assert state.evidence_summary["evidence_count"] == 1
+    assert state.evidence_summary["claim_count"] == 0
+    assert state.evidence_summary["claim_link_count"] == 0
+    assert state.evidence_summary["artifact_count"] == 0
+    assert state.evidence_summary["metric_count"] == 0
+    assert state.evidence_summary["log_count"] == 0
+    assert [
+        _summary_item_id(item)
+        for item in state.evidence_summary["items"]
+    ] == ["evidence-1", "verdict-coverage", "verdict-risk"]
+    assert state.evidence_summary["items"][1]["summary"] == "Coverage verified."
+    assert state.evidence_summary["items"][2]["verdict"] == "inconclusive"
+
+
 def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
     state = build_workflow_state(
         session_id="session-a",
@@ -545,6 +647,11 @@ def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
                 evidence_id="evidence-b",
                 session_id="session-b",
             ),
+            make_verifier_completed_event(
+                sequence=7,
+                verdict_id="verdict-b",
+                session_id="session-b",
+            ),
         ],
     )
 
@@ -561,6 +668,47 @@ def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
         "items": [],
     }
     assert state.compatibility.stale is True
+
+
+def test_verifier_completed_replay_retry_keeps_latest_verdict_in_summary():
+    initial_verdict = make_verifier_completed_event(
+        sequence=1,
+        verdict_id="verdict-1",
+        verdict="inconclusive",
+        summary="Initial verifier result.",
+    )
+    latest_verdict = make_verifier_completed_event(
+        sequence=2,
+        verdict_id="verdict-1",
+        verdict="failed",
+        summary="Retried verifier result.",
+        event_id="event-verdict-latest",
+    )
+
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            initial_verdict,
+            latest_verdict,
+            latest_verdict.model_copy(),
+        ],
+    )
+
+    assert state.evidence_summary["verifier_count"] == 1
+    assert state.evidence_summary["verifier_counts"] == {
+        "passed": 0,
+        "failed": 1,
+        "inconclusive": 0,
+    }
+    assert state.evidence_summary["verifier_status"] == "failed"
+    assert [
+        _summary_item_id(item)
+        for item in state.evidence_summary["items"]
+    ] == ["verdict-1"]
+    assert (
+        state.evidence_summary["items"][0]["summary"]
+        == "Retried verifier result."
+    )
 
 
 def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic():
@@ -595,6 +743,10 @@ def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic()
         link_id="evidence-link-1",
         evidence_id="evidence-1",
     )
+    verifier_verdict = make_verifier_completed_event(
+        sequence=9,
+        verdict_id="verdict-1",
+    )
 
     state = build_workflow_state(
         session_id="session-a",
@@ -613,6 +765,8 @@ def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic()
             evidence_item.model_copy(),
             claim_link,
             claim_link.model_copy(),
+            verifier_verdict,
+            verifier_verdict.model_copy(),
         ],
     )
 
@@ -625,10 +779,19 @@ def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic()
     assert state.evidence_summary["evidence_count"] == 1
     assert state.evidence_summary["claim_count"] == 1
     assert state.evidence_summary["claim_link_count"] == 1
+    assert state.evidence_summary["verifier_count"] == 1
+    assert state.evidence_summary["verifier_status"] == "passed"
     assert [
         _summary_item_id(item)
         for item in state.evidence_summary["items"]
-    ] == ["artifact-1", "metric-1", "log-1", "evidence-1", "evidence-link-1"]
+    ] == [
+        "artifact-1",
+        "metric-1",
+        "log-1",
+        "evidence-1",
+        "evidence-link-1",
+        "verdict-1",
+    ]
     assert state.evidence_summary["items"][0]["label"] == "Final checkpoint"
 
 
