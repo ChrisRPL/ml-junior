@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from agent.core.local_inference import LocalInferenceConfigError
 from agent.core.llm_params import (
     UnsupportedEffortError,
     _PROVIDER_REGISTRY,
@@ -17,6 +18,24 @@ from agent.core.model_switcher import (
     probe_and_switch_model,
 )
 from backend.routes.agent import AVAILABLE_MODELS, _require_openai_configured
+
+
+_LOCAL_ENDPOINT_ENV_NAMES = (
+    "MLJ_LOCAL_OLLAMA_BASE_URL",
+    "MLJ_OLLAMA_BASE_URL",
+    "OLLAMA_BASE_URL",
+    "MLJ_LOCAL_LLAMACPP_BASE_URL",
+    "MLJ_LOCAL_LLAMA_CPP_BASE_URL",
+    "MLJ_LLAMACPP_BASE_URL",
+    "LLAMACPP_BASE_URL",
+    "LLAMA_CPP_BASE_URL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_local_endpoint_env(monkeypatch):
+    for name in _LOCAL_ENDPOINT_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
 
 
 class _Console:
@@ -83,6 +102,44 @@ def test_local_llamacpp_params_use_openai_compatible_defaults():
         "api_base": "http://localhost:8080/v1",
         "api_key": "local-dummy-key",
     }
+
+
+def test_local_ollama_env_base_url_override_is_normalized(monkeypatch):
+    monkeypatch.setenv("MLJ_LOCAL_OLLAMA_BASE_URL", "http://127.0.0.1:9999/")
+
+    params = _resolve_llm_params("local/ollama/llama3.2:latest")
+
+    assert params["api_base"] == "http://127.0.0.1:9999/v1"
+
+
+def test_local_llamacpp_config_base_url_is_normalized():
+    config = SimpleNamespace(
+        local_inference={
+            "llamacpp": {"base_url": "http://192.168.1.42:9090/v1/"}
+        }
+    )
+
+    params = _resolve_llm_params("local/llamacpp/qwen3-coder", config=config)
+
+    assert params["api_base"] == "http://192.168.1.42:9090/v1"
+
+
+def test_local_base_url_rejects_invalid_url(monkeypatch):
+    monkeypatch.setenv("MLJ_LOCAL_OLLAMA_BASE_URL", "localhost:11434")
+
+    with pytest.raises(LocalInferenceConfigError) as exc:
+        _resolve_llm_params("local/ollama/llama3.2:latest")
+
+    assert "scheme must be http or https" in str(exc.value)
+
+
+def test_local_base_url_rejects_remote_url(monkeypatch):
+    monkeypatch.setenv("MLJ_LOCAL_LLAMACPP_BASE_URL", "https://api.openai.com/v1")
+
+    with pytest.raises(LocalInferenceConfigError) as exc:
+        _resolve_llm_params("local/llamacpp/qwen3-coder")
+
+    assert "host must be localhost or a private IP address" in str(exc.value)
 
 
 def test_local_strict_effort_is_rejected_before_provider_call():

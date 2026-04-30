@@ -8,6 +8,11 @@ creating circular imports.
 import os
 from dataclasses import dataclass
 
+from agent.core.local_inference import (
+    resolve_local_inference_base_url,
+    supported_local_runtimes,
+)
+
 
 @dataclass(frozen=True)
 class ProviderCapability:
@@ -133,17 +138,6 @@ def _provider_for_model(model_name: str) -> ProviderCapability:
 
 
 _LOCAL_DUMMY_API_KEY = "local-dummy-key"
-_LOCAL_OPENAI_BASE_URLS = {
-    "ollama": "http://localhost:11434",
-    "llamacpp": "http://localhost:8080",
-}
-
-
-def _normalize_openai_compatible_base_url(base_url: str) -> str:
-    base = base_url.strip().rstrip("/")
-    if base.endswith("/v1"):
-        return base
-    return f"{base}/v1"
 
 
 def _parse_local_model_id(model_name: str) -> tuple[str, str]:
@@ -156,7 +150,7 @@ def _parse_local_model_id(model_name: str) -> tuple[str, str]:
 
     runtime, local_model = parts[1], parts[2]
     if (
-        runtime not in _LOCAL_OPENAI_BASE_URLS
+        runtime not in supported_local_runtimes()
         or not local_model
         or local_model != local_model.strip()
         or local_model.startswith("/")
@@ -189,6 +183,7 @@ def _resolve_llm_params(
     session_hf_token: str | None = None,
     reasoning_effort: str | None = None,
     strict: bool = False,
+    config=None,
 ) -> dict:
     """
     Build LiteLLM kwargs for a given model id.
@@ -211,9 +206,11 @@ def _resolve_llm_params(
 
     • ``local/ollama/<model>`` / ``local/llamacpp/<alias>`` — local
       OpenAI-compatible inference. We send ``model=openai/<name>`` with a
-      normalized ``/v1`` local ``api_base`` and a dummy non-empty
-      ``api_key``. Reasoning effort is not forwarded; local servers vary
-      and should not require any remote credential.
+      normalized, localhost/private-IP-only ``/v1`` local ``api_base`` and
+      a dummy non-empty ``api_key``. ``api_base`` comes from env, then
+      optional config, then local defaults. Reasoning effort is not
+      forwarded; local servers vary and should not require any remote
+      credential.
 
     • Anything else is treated as a HuggingFace router id. We hit the
       auto-routing OpenAI-compatible endpoint at
@@ -247,9 +244,7 @@ def _resolve_llm_params(
             )
         return {
             "model": f"openai/{local_model}",
-            "api_base": _normalize_openai_compatible_base_url(
-                _LOCAL_OPENAI_BASE_URLS[runtime]
-            ),
+            "api_base": resolve_local_inference_base_url(runtime, config),
             "api_key": _LOCAL_DUMMY_API_KEY,
         }
 
