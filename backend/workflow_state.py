@@ -11,9 +11,14 @@ from backend.evidence_ledger import (
     evidence_item_record_from_event,
 )
 from backend.experiment_ledger import project_log_refs, project_metrics
+from backend.flow_verifier_mapping import build_flow_verifier_coverage_report
 from backend.job_artifact_refs import project_active_jobs, project_artifact_refs
 from backend.operation_store import OperationRecord
 from backend.session_store import SessionRecord
+from backend.verifier_check_catalog import (
+    VerifierCheckCatalogNotFoundError,
+    get_builtin_verifier_check,
+)
 from backend.verifier_ledger import (
     VERIFIER_COMPLETED_EVENT,
     verifier_verdict_record_from_event,
@@ -678,6 +683,7 @@ def _evidence_summary(
         summary["verifier_count"] = len(verifier_verdicts)
         summary["verifier_counts"] = _verifier_verdict_counts(verifier_verdicts)
         summary["verifier_status"] = _verifier_summary_status(verifier_verdicts)
+        summary["verifier_catalog"] = _verifier_catalog_metadata(verifier_verdicts)
     return summary
 
 
@@ -701,6 +707,85 @@ def _verifier_summary_status(verifier_verdicts: list[dict[str, Any]]) -> str:
     if "passed" in statuses:
         return "passed"
     return "unknown"
+
+
+def _verifier_catalog_metadata(
+    verifier_verdicts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    observed_ids = _verifier_observed_check_ids(verifier_verdicts)
+    direct_catalog_check_ids = tuple(
+        verifier_id
+        for verifier_id in observed_ids
+        if _is_builtin_catalog_check_id(verifier_id)
+    )
+    direct_catalog_check_id_set = set(direct_catalog_check_ids)
+    flow_local_verifier_ids = tuple(
+        verifier_id
+        for verifier_id in observed_ids
+        if verifier_id not in direct_catalog_check_id_set
+    )
+    coverage = build_flow_verifier_coverage_report(flow_local_verifier_ids)
+    mapping_rows = [
+        {
+            "flow_verifier_id": mapping.flow_verifier_id,
+            "catalog_check_id": mapping.catalog_check_id,
+        }
+        for mapping in coverage.mapped
+    ]
+    mapped_catalog_check_ids = tuple(
+        sorted({row["catalog_check_id"] for row in mapping_rows})
+    )
+    catalog_check_ids = tuple(
+        sorted({*direct_catalog_check_ids, *mapped_catalog_check_ids})
+    )
+    intentional_unmapped_ids = coverage.intentional_unmapped_verifier_ids
+    unknown_ids = coverage.unknown_unmapped_verifier_ids
+
+    return {
+        "source": "flow_verifier_mapping",
+        "catalog_check_ids": list(catalog_check_ids),
+        "direct_catalog_check_ids": list(direct_catalog_check_ids),
+        "mapped_catalog_check_ids": list(mapped_catalog_check_ids),
+        "flow_local_verifier_ids": list(flow_local_verifier_ids),
+        "intentional_unmapped_ids": list(intentional_unmapped_ids),
+        "unknown_ids": list(unknown_ids),
+        "mapping_rows": mapping_rows,
+        "counts": {
+            "verdict_count": len(verifier_verdicts),
+            "observed_id_count": len(observed_ids),
+            "catalog_check_id_count": len(catalog_check_ids),
+            "direct_catalog_check_id_count": len(direct_catalog_check_ids),
+            "mapped_catalog_check_id_count": len(mapped_catalog_check_ids),
+            "flow_local_verifier_id_count": len(flow_local_verifier_ids),
+            "intentional_unmapped_id_count": len(intentional_unmapped_ids),
+            "unknown_id_count": len(unknown_ids),
+        },
+    }
+
+
+def _verifier_observed_check_ids(
+    verifier_verdicts: list[dict[str, Any]],
+) -> tuple[str, ...]:
+    observed: set[str] = set()
+    for verdict in verifier_verdicts:
+        verifier_id = verdict.get("verifier_id")
+        if isinstance(verifier_id, str) and verifier_id:
+            observed.add(verifier_id)
+        for check in verdict.get("checks") or []:
+            if not isinstance(check, dict):
+                continue
+            check_id = check.get("check_id")
+            if isinstance(check_id, str) and check_id:
+                observed.add(check_id)
+    return tuple(sorted(observed))
+
+
+def _is_builtin_catalog_check_id(check_id: str) -> bool:
+    try:
+        get_builtin_verifier_check(check_id)
+    except VerifierCheckCatalogNotFoundError:
+        return False
+    return True
 
 
 def _evidence_item_sort_key(item: dict[str, Any]) -> tuple[int, str]:

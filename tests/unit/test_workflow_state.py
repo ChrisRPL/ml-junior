@@ -20,6 +20,11 @@ from backend.verifier_ledger import (
     VERIFIER_COMPLETED_EVENT,
     verifier_completed_payload,
 )
+from backend.verifier_check_catalog import (
+    CHECK_CODE_EXECUTION_OBSERVED,
+    CHECK_FINAL_CLAIMS_TIED_TO_EVIDENCE,
+    CHECK_METRIC_PARSED_FROM_OUTPUT,
+)
 from backend.workflow_state import build_workflow_state
 import routes.agent as agent_routes
 import session_manager as session_module
@@ -236,17 +241,36 @@ def make_verifier_completed_event(
     *,
     sequence: int,
     verdict_id: str = "verdict-1",
+    verifier_id: str = "final-claims-have-evidence",
     verdict: str = "passed",
     summary: str = "Claims have support.",
+    check_ids: list[str | None] | None = None,
     session_id: str = "session-a",
     event_id: str | None = None,
     source_event_sequence: int | None = None,
 ) -> AgentEvent:
+    checks = [
+        {
+            **({} if check_id is None else {"check_id": check_id}),
+            "name": f"Verifier check {index + 1}",
+            "status": (
+                verdict
+                if verdict in {"passed", "failed"}
+                else "inconclusive"
+            ),
+            "summary": summary,
+            "evidence_ids": ["evidence-1"],
+            "metadata": {"claim_id": "claim-1"},
+        }
+        for index, check_id in enumerate(
+            ["check-1"] if check_ids is None else check_ids
+        )
+    ]
     record = VerifierVerdictRecord.model_validate(
         {
             "session_id": session_id,
             "verdict_id": verdict_id,
-            "verifier_id": "final-claims-have-evidence",
+            "verifier_id": verifier_id,
             "source_event_sequence": source_event_sequence or sequence,
             "verdict": verdict,
             "scope": "final_answer",
@@ -257,20 +281,7 @@ def make_verifier_completed_event(
             "claim_ids": ["claim-1"],
             "summary": summary,
             "rationale": "Evidence supports the final claim.",
-            "checks": [
-                {
-                    "check_id": "check-1",
-                    "name": "Claim coverage",
-                    "status": (
-                        verdict
-                        if verdict in {"passed", "failed"}
-                        else "inconclusive"
-                    ),
-                    "summary": summary,
-                    "evidence_ids": ["evidence-1"],
-                    "metadata": {"claim_id": "claim-1"},
-                }
-            ],
+            "checks": checks,
             "metadata": {"source": "synthetic-fixture"},
             "redaction_status": "none",
             "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
@@ -612,6 +623,103 @@ def test_verifier_completed_projects_into_evidence_summary():
     assert state.evidence_summary["items"][2]["verdict"] == "inconclusive"
 
 
+def test_verifier_completed_reconciles_mapped_and_catalog_ids():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_verifier_completed_event(
+                sequence=1,
+                verdict_id="verdict-metric",
+                verifier_id="metric-recorded",
+                check_ids=[CHECK_CODE_EXECUTION_OBSERVED],
+            ),
+        ],
+    )
+
+    assert state.evidence_summary["verifier_catalog"] == {
+        "source": "flow_verifier_mapping",
+        "catalog_check_ids": [
+            CHECK_CODE_EXECUTION_OBSERVED,
+            CHECK_METRIC_PARSED_FROM_OUTPUT,
+        ],
+        "direct_catalog_check_ids": [CHECK_CODE_EXECUTION_OBSERVED],
+        "mapped_catalog_check_ids": [CHECK_METRIC_PARSED_FROM_OUTPUT],
+        "flow_local_verifier_ids": ["metric-recorded"],
+        "intentional_unmapped_ids": [],
+        "unknown_ids": [],
+        "mapping_rows": [
+            {
+                "flow_verifier_id": "metric-recorded",
+                "catalog_check_id": CHECK_METRIC_PARSED_FROM_OUTPUT,
+            }
+        ],
+        "counts": {
+            "verdict_count": 1,
+            "observed_id_count": 2,
+            "catalog_check_id_count": 2,
+            "direct_catalog_check_id_count": 1,
+            "mapped_catalog_check_id_count": 1,
+            "flow_local_verifier_id_count": 1,
+            "intentional_unmapped_id_count": 0,
+            "unknown_id_count": 0,
+        },
+    }
+
+
+def test_verifier_completed_reconciles_intentional_unmapped_ids():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_verifier_completed_event(
+                sequence=1,
+                verdict_id="verdict-goal",
+                verifier_id="goal-is-testable",
+                check_ids=[],
+            ),
+        ],
+    )
+
+    assert state.evidence_summary["verifier_catalog"]["catalog_check_ids"] == []
+    assert state.evidence_summary["verifier_catalog"]["flow_local_verifier_ids"] == [
+        "goal-is-testable"
+    ]
+    assert state.evidence_summary["verifier_catalog"]["intentional_unmapped_ids"] == [
+        "goal-is-testable"
+    ]
+    assert state.evidence_summary["verifier_catalog"]["unknown_ids"] == []
+    assert state.evidence_summary["verifier_catalog"]["counts"][
+        "intentional_unmapped_id_count"
+    ] == 1
+
+
+def test_verifier_completed_reconciles_unknown_unmapped_ids():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_verifier_completed_event(
+                sequence=1,
+                verdict_id="verdict-custom",
+                verifier_id="custom-flow-check",
+                check_ids=["custom-inner-check"],
+            ),
+        ],
+    )
+
+    assert state.evidence_summary["verifier_catalog"]["catalog_check_ids"] == []
+    assert state.evidence_summary["verifier_catalog"]["flow_local_verifier_ids"] == [
+        "custom-flow-check",
+        "custom-inner-check",
+    ]
+    assert state.evidence_summary["verifier_catalog"]["intentional_unmapped_ids"] == []
+    assert state.evidence_summary["verifier_catalog"]["unknown_ids"] == [
+        "custom-flow-check",
+        "custom-inner-check",
+    ]
+    assert state.evidence_summary["verifier_catalog"]["counts"][
+        "unknown_id_count"
+    ] == 2
+
+
 def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
     state = build_workflow_state(
         session_id="session-a",
@@ -674,14 +782,18 @@ def test_verifier_completed_replay_retry_keeps_latest_verdict_in_summary():
     initial_verdict = make_verifier_completed_event(
         sequence=1,
         verdict_id="verdict-1",
+        verifier_id="custom-flow-check",
         verdict="inconclusive",
         summary="Initial verifier result.",
+        check_ids=["custom-inner-check"],
     )
     latest_verdict = make_verifier_completed_event(
         sequence=2,
         verdict_id="verdict-1",
+        verifier_id="metric-recorded",
         verdict="failed",
         summary="Retried verifier result.",
+        check_ids=[CHECK_FINAL_CLAIMS_TIED_TO_EVIDENCE],
         event_id="event-verdict-latest",
     )
 
@@ -709,6 +821,14 @@ def test_verifier_completed_replay_retry_keeps_latest_verdict_in_summary():
         state.evidence_summary["items"][0]["summary"]
         == "Retried verifier result."
     )
+    assert state.evidence_summary["verifier_catalog"]["catalog_check_ids"] == [
+        CHECK_FINAL_CLAIMS_TIED_TO_EVIDENCE,
+        CHECK_METRIC_PARSED_FROM_OUTPUT,
+    ]
+    assert state.evidence_summary["verifier_catalog"]["mapped_catalog_check_ids"] == [
+        CHECK_METRIC_PARSED_FROM_OUTPUT
+    ]
+    assert state.evidence_summary["verifier_catalog"]["unknown_ids"] == []
 
 
 def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic():
