@@ -710,6 +710,96 @@ def _valid_verifier_completed_payload() -> dict:
     }
 
 
+def _valid_decision_card_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "decision_id": " decision-1 ",
+        "source_event_sequence": 20,
+        "title": " Metric choice ",
+        "decision": " Use macro F1. ",
+        "status": "accepted",
+        "rationale": " Better coverage for minority classes. ",
+        "phase_id": " phase-eval ",
+        "run_id": " run-1 ",
+        "actor": " human-review ",
+        "alternatives": [
+            {
+                "alternative_id": " alt-accuracy ",
+                "title": " Accuracy ",
+                "summary": " Rejected because classes are imbalanced. ",
+                "outcome": "rejected",
+            }
+        ],
+        "evidence_ids": [" evidence-1 "],
+        "claim_ids": [" claim-1 "],
+        "artifact_ids": [" artifact-1 "],
+        "proof_bundle_ids": [" proof-1 "],
+        "manifest_refs": [
+            {
+                "manifest_id": " manifest-1 ",
+                "source": "remote_uri",
+                "uri": " https://example.test/manifest.json ",
+                "checksum_ids": [" checksum-1 "],
+                "label": " Metric manifest ",
+            }
+        ],
+        "checksum_refs": [
+            {
+                "checksum_id": " checksum-1 ",
+                "algorithm": "sha256",
+                "value": " abc123 ",
+                "source": "manual",
+                "label": " Manifest digest ",
+            }
+        ],
+        "metadata": {"reviewed_by": "synthetic-fixture"},
+        "privacy_class": "private",
+        "redaction_status": "none",
+        "created_at": " 2026-04-29T10:10:00Z ",
+    }
+
+
+def _valid_proof_bundle_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "proof_id": " proof-1 ",
+        "source_event_sequence": 21,
+        "title": " Metric choice proof ",
+        "summary": " Evidence and verifier refs supporting metric choice. ",
+        "status": "complete",
+        "scope": " metric-selection ",
+        "phase_id": " phase-eval ",
+        "run_id": " run-1 ",
+        "decision_ids": [" decision-1 "],
+        "evidence_ids": [" evidence-1 "],
+        "claim_ids": [" claim-1 "],
+        "artifact_ids": [" artifact-1 "],
+        "verifier_verdict_ids": [" verdict-1 "],
+        "manifest_refs": [
+            {
+                "manifest_id": " manifest-1 ",
+                "source": "remote_uri",
+                "uri": " https://example.test/proof-manifest.json ",
+                "checksum_ids": [" checksum-1 "],
+                "label": " Proof manifest ",
+            }
+        ],
+        "checksum_refs": [
+            {
+                "checksum_id": " checksum-1 ",
+                "algorithm": "sha256",
+                "value": " abc123 ",
+                "source": "manual",
+                "label": " Proof manifest digest ",
+            }
+        ],
+        "metadata": {"reviewed_by": "synthetic-fixture"},
+        "privacy_class": "private",
+        "redaction_status": "none",
+        "created_at": " 2026-04-29T10:11:00Z ",
+    }
+
+
 def test_dataset_snapshot_recorded_payload_validates_and_normalizes():
     event = AgentEvent(
         session_id="session-a",
@@ -1088,6 +1178,276 @@ def test_verifier_completed_payload_rejects_invalid_check_status():
             event_type="verifier.completed",
             data=payload,
         )
+
+
+def test_decision_card_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=19,
+        event_type="decision_card.recorded",
+        data=_valid_decision_card_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["decision_id"] == "decision-1"
+    assert event.data["title"] == "Metric choice"
+    assert event.data["decision"] == "Use macro F1."
+    assert event.data["actor"] == "human-review"
+    assert event.data["alternatives"][0]["title"] == "Accuracy"
+    assert event.data["proof_bundle_ids"] == ["proof-1"]
+    assert event.data["manifest_refs"][0]["manifest_id"] == "manifest-1"
+    assert event.data["manifest_refs"][0]["checksum_ids"] == ["checksum-1"]
+    assert event.data["checksum_refs"][0]["value"] == "abc123"
+
+
+def test_proof_bundle_recorded_payload_validates_and_normalizes_alias():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=20,
+        event_type="proof_bundle.recorded",
+        data=_valid_proof_bundle_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["proof_bundle_id"] == "proof-1"
+    assert "proof_id" not in event.data
+    assert event.data["title"] == "Metric choice proof"
+    assert event.data["summary"] == "Evidence and verifier refs supporting metric choice."
+    assert event.data["scope"] == "metric-selection"
+    assert event.data["decision_ids"] == ["decision-1"]
+    assert event.data["verifier_verdict_ids"] == ["verdict-1"]
+    assert event.data["manifest_refs"][0]["uri"] == (
+        "https://example.test/proof-manifest.json"
+    )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "path"),
+    [
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            ("unexpected",),
+        ),
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            ("alternatives", 0, "unexpected"),
+        ),
+        (
+            "proof_bundle.recorded",
+            _valid_proof_bundle_recorded_payload,
+            ("checksum_refs", 0, "signature"),
+        ),
+        (
+            "proof_bundle.recorded",
+            _valid_proof_bundle_recorded_payload,
+            ("manifest_refs", 0, "unexpected"),
+        ),
+    ],
+)
+def test_decision_proof_payloads_reject_unknown_fields(
+    event_type,
+    payload_factory,
+    path,
+):
+    payload = payload_factory()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = True
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=21,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "path"),
+    [
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            ("session_id",),
+        ),
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            ("decision_id",),
+        ),
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            ("alternatives", 0, "title"),
+        ),
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            ("manifest_refs", 0, "checksum_ids", 0),
+        ),
+        (
+            "proof_bundle.recorded",
+            _valid_proof_bundle_recorded_payload,
+            ("proof_id",),
+        ),
+        (
+            "proof_bundle.recorded",
+            _valid_proof_bundle_recorded_payload,
+            ("summary",),
+        ),
+        (
+            "proof_bundle.recorded",
+            _valid_proof_bundle_recorded_payload,
+            ("verifier_verdict_ids", 0),
+        ),
+    ],
+)
+def test_decision_proof_payloads_reject_empty_required_ids_and_text(
+    event_type,
+    payload_factory,
+    path,
+):
+    payload = payload_factory()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = ""
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=21,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "field", "value"),
+    [
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            "status",
+            "signed",
+        ),
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            "source_event_sequence",
+            0,
+        ),
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            "redaction_status",
+            "complete",
+        ),
+        (
+            "proof_bundle.recorded",
+            _valid_proof_bundle_recorded_payload,
+            "status",
+            "verified",
+        ),
+        (
+            "proof_bundle.recorded",
+            _valid_proof_bundle_recorded_payload,
+            "privacy_class",
+            "internal",
+        ),
+    ],
+)
+def test_decision_proof_payloads_reject_invalid_values(
+    event_type,
+    payload_factory,
+    field,
+    value,
+):
+    payload = payload_factory()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=21,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload_factory", "mutation"),
+    [
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            lambda payload: payload.update(
+                {"evidence_ids": ["evidence-1", "evidence-1"]}
+            ),
+        ),
+        (
+            "decision_card.recorded",
+            _valid_decision_card_recorded_payload,
+            lambda payload: payload["manifest_refs"][0].update(
+                {"checksum_ids": ["checksum-missing"]}
+            ),
+        ),
+        (
+            "proof_bundle.recorded",
+            _valid_proof_bundle_recorded_payload,
+            lambda payload: payload.update(
+                {"decision_ids": ["decision-1", "decision-1"]}
+            ),
+        ),
+        (
+            "proof_bundle.recorded",
+            _valid_proof_bundle_recorded_payload,
+            lambda payload: payload["checksum_refs"][0].update(
+                {"source": "local_path", "path": None}
+            ),
+        ),
+    ],
+)
+def test_decision_proof_payloads_reject_duplicate_or_invalid_refs(
+    event_type,
+    payload_factory,
+    mutation,
+):
+    payload = payload_factory()
+    mutation(payload)
+
+    with pytest.raises(ValidationError):
+        AgentEvent(
+            session_id="session-a",
+            sequence=21,
+            event_type=event_type,
+            data=payload,
+        )
+
+
+def test_decision_proof_payloads_redact_sensitive_fields_in_event_copy():
+    secret = "hf_eventdecisionsecret123456789"
+    payload = _valid_decision_card_recorded_payload()
+    payload["rationale"] = f"Authorization: Bearer {secret}"
+    payload["metadata"] = {"api_key": secret}
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=21,
+        event_type="decision_card.recorded",
+        data=payload,
+    )
+
+    redacted = event.redacted_copy()
+
+    assert redacted.redaction_status in {"partial", "redacted"}
+    assert secret not in str(redacted.data)
+    assert redacted.data["redaction_status"] == redacted.redaction_status
 
 
 @pytest.mark.parametrize(

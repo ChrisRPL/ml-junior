@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from agent.core.redaction import REDACTION_NONE, redact_value
+from backend.decision_proof_ledger import DecisionCardRecord, ProofBundleRecord
 from backend.human_requests import (
     HUMAN_REQUEST_REQUESTED_EVENT,
     HUMAN_REQUEST_RESOLVED_EVENT,
@@ -528,6 +529,14 @@ class VerifierCompletedPayload(VerifierLedgerPayload):
     created_at: NonEmptyStr | None = None
 
 
+class DecisionCardRecordedPayload(DecisionCardRecord):
+    """Closed-schema payload for inert decision card records."""
+
+
+class ProofBundleRecordedPayload(ProofBundleRecord):
+    """Closed-schema payload for inert proof bundle records."""
+
+
 EVENT_PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "ready": MessagePayload,
     "processing": MessagePayload,
@@ -559,6 +568,8 @@ EVENT_PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "evidence_item.recorded": EvidenceItemRecordedPayload,
     "evidence_claim_link.recorded": EvidenceClaimLinkRecordedPayload,
     "verifier.completed": VerifierCompletedPayload,
+    "decision_card.recorded": DecisionCardRecordedPayload,
+    "proof_bundle.recorded": ProofBundleRecordedPayload,
     HUMAN_REQUEST_REQUESTED_EVENT: HumanRequestRequestedPayload,
     HUMAN_REQUEST_RESOLVED_EVENT: HumanRequestResolvedPayload,
 }
@@ -616,9 +627,12 @@ class AgentEvent(BaseModel):
         if result.status == REDACTION_NONE:
             return self
         status = _stronger_redaction_status(self.redaction_status, result.status)
+        data = result.value
+        if isinstance(data, dict) and "redaction_status" in data:
+            data = {**data, "redaction_status": status}
         return self.model_copy(
             update={
-                "data": result.value,
+                "data": data,
                 "redaction_status": status,
             }
         )
