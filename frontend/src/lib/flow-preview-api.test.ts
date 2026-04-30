@@ -155,12 +155,157 @@ async function testPreviewHappyPath(): Promise<void> {
   assert(result.ok && result.preview.risky_operations.length === 1, 'preview should surface risky operations');
 }
 
+async function testMappedVerifierMetadata(): Promise<void> {
+  const mappedPreview: FlowPreviewResponse = {
+    ...preview,
+    verifier_checks: [
+      {
+        ...preview.verifier_checks[0]!,
+        mapping_status: 'mapped',
+        catalog_check_id: 'metric-parsed-from-output',
+        catalog_check_name: 'Metric parsed from output',
+        catalog_check_category: 'evaluation',
+        catalog_check_type: 'metric',
+        catalog_evidence_ref_types: ['metric', 'experiment'],
+      },
+    ],
+    verifier_catalog_coverage: {
+      verifier_count: 1,
+      mapped_count: 1,
+      unmapped_count: 0,
+      intentional_unmapped_verifier_ids: [],
+      unknown_unmapped_verifier_ids: [],
+    },
+  };
+  const fetcher: FlowPreviewFetch = async () => response(200, mappedPreview);
+  const result = await fetchFlowPreview('fine-tune-model', fetcher);
+
+  assert(result.ok, 'mapped verifier metadata should load');
+  assert(
+    result.ok && result.preview.verifier_checks[0]?.catalog_check_id === 'metric-parsed-from-output',
+    'mapped verifier should preserve catalog id',
+  );
+  assert(
+    result.ok && result.preview.verifier_catalog_coverage?.mapped_count === 1,
+    'mapped verifier should preserve coverage summary',
+  );
+}
+
+async function testIntentionalUnmappedVerifierMetadata(): Promise<void> {
+  const intentionalPreview: FlowPreviewResponse = {
+    ...preview,
+    verifier_checks: [
+      {
+        ...preview.verifier_checks[0]!,
+        id: 'goal-is-testable',
+        mapping_status: 'intentional_unmapped',
+        catalog_check_id: null,
+        catalog_check_name: null,
+        catalog_check_category: null,
+        catalog_check_type: null,
+        catalog_evidence_ref_types: [],
+      },
+    ],
+    verifier_catalog_coverage: {
+      verifier_count: 1,
+      mapped_count: 0,
+      unmapped_count: 1,
+      intentional_unmapped_verifier_ids: ['goal-is-testable'],
+      unknown_unmapped_verifier_ids: [],
+    },
+  };
+  const fetcher: FlowPreviewFetch = async () => response(200, intentionalPreview);
+  const result = await fetchFlowPreview('literature-overview', fetcher);
+
+  assert(result.ok, 'intentional unmapped verifier metadata should load');
+  assert(
+    result.ok && result.preview.verifier_checks[0]?.mapping_status === 'intentional_unmapped',
+    'intentional unmapped status should be preserved',
+  );
+  assert(
+    result.ok && result.preview.verifier_catalog_coverage?.intentional_unmapped_verifier_ids[0] === 'goal-is-testable',
+    'intentional unmapped coverage id should be preserved',
+  );
+}
+
+async function testUnknownUnmappedVerifierMetadata(): Promise<void> {
+  const unknownPreview: FlowPreviewResponse = {
+    ...preview,
+    verifier_checks: [
+      {
+        ...preview.verifier_checks[0]!,
+        id: 'new-local-check',
+        mapping_status: 'unknown_unmapped',
+        catalog_check_id: null,
+        catalog_check_name: null,
+        catalog_check_category: null,
+        catalog_check_type: null,
+        catalog_evidence_ref_types: [],
+      },
+    ],
+    verifier_catalog_coverage: {
+      verifier_count: 1,
+      mapped_count: 0,
+      unmapped_count: 1,
+      intentional_unmapped_verifier_ids: [],
+      unknown_unmapped_verifier_ids: ['new-local-check'],
+    },
+  };
+  const fetcher: FlowPreviewFetch = async () => response(200, unknownPreview);
+  const result = await fetchFlowPreview('custom', fetcher);
+
+  assert(result.ok, 'unknown unmapped verifier metadata should load');
+  assert(
+    result.ok && result.preview.verifier_checks[0]?.mapping_status === 'unknown_unmapped',
+    'unknown unmapped status should be preserved',
+  );
+  assert(
+    result.ok && result.preview.verifier_catalog_coverage?.unknown_unmapped_verifier_ids[0] === 'new-local-check',
+    'unknown unmapped coverage id should be preserved',
+  );
+}
+
 async function testMalformedCatalog(): Promise<void> {
   const fetcher: FlowPreviewFetch = async () => response(200, { id: 'not-a-list' });
   const result = await fetchFlowCatalog(fetcher);
 
   assert(!result.ok, 'malformed catalog should fail');
   assert(!result.ok && result.warning === 'flow_catalog_malformed', 'malformed catalog warning should be explicit');
+}
+
+async function testMalformedOptionalVerifierMetadata(): Promise<void> {
+  const malformedPreview = {
+    ...preview,
+    verifier_checks: [
+      {
+        ...preview.verifier_checks[0]!,
+        mapping_status: 'partially_mapped',
+      },
+    ],
+  };
+  const fetcher: FlowPreviewFetch = async () => response(200, malformedPreview);
+  const result = await fetchFlowPreview('fine-tune-model', fetcher);
+
+  assert(!result.ok, 'malformed optional verifier metadata should fail');
+  assert(!result.ok && result.warning === 'flow_preview_malformed', 'malformed optional verifier metadata warning should be explicit');
+}
+
+async function testMalformedOptionalCoverageMetadata(): Promise<void> {
+  const malformedPreview = {
+    ...preview,
+    verifier_catalog_coverage: {
+      verifier_count: 1,
+      mapped_count: '1',
+      unmapped_count: 0,
+      intentional_unmapped_verifier_ids: [],
+      unknown_unmapped_verifier_ids: [],
+    },
+  };
+  const fetcher: FlowPreviewFetch = async () => response(200, malformedPreview);
+  const result = await fetchFlowPreview('fine-tune-model', fetcher);
+
+  assert(!result.ok, 'malformed optional coverage metadata should fail');
+  assert(!result.ok && result.warning === 'flow_preview_malformed', 'malformed optional coverage metadata warning should be explicit');
 }
 
 async function testMissingBackend(): Promise<void> {
@@ -176,10 +321,15 @@ async function testMissingBackend(): Promise<void> {
 async function run(): Promise<void> {
   await testCatalogHappyPath();
   await testPreviewHappyPath();
+  await testMappedVerifierMetadata();
+  await testIntentionalUnmappedVerifierMetadata();
+  await testUnknownUnmappedVerifierMetadata();
   await testMalformedCatalog();
+  await testMalformedOptionalVerifierMetadata();
+  await testMalformedOptionalCoverageMetadata();
   await testMissingBackend();
 }
 
 run().then(() => {
-  console.log('flow-preview-api: 4 tests passed');
+  console.log('flow-preview-api: 9 tests passed');
 });

@@ -1,5 +1,7 @@
 import { isRecord } from './project-projection-utils';
 
+const INVALID_OPTIONAL_VALUE = Symbol('invalid_optional_value');
+
 export type FlowPreviewFetch = (path: string, options?: RequestInit) => Promise<Response>;
 
 export interface FlowTemplateMetadata {
@@ -84,6 +86,12 @@ export interface FlowVerifierCheckPreview {
   description: string;
   required: boolean;
   phase_ids: string[];
+  mapping_status?: 'mapped' | 'intentional_unmapped' | 'unknown_unmapped';
+  catalog_check_id?: string | null;
+  catalog_check_name?: string | null;
+  catalog_check_category?: string | null;
+  catalog_check_type?: string | null;
+  catalog_evidence_ref_types?: string[];
 }
 
 export interface FlowRiskyOperationPreview {
@@ -94,6 +102,14 @@ export interface FlowRiskyOperationPreview {
   description: string | null;
   source: 'approval_point';
   phase_ids: string[];
+}
+
+export interface FlowVerifierCatalogCoveragePreview {
+  verifier_count: number;
+  mapped_count: number;
+  unmapped_count: number;
+  intentional_unmapped_verifier_ids: string[];
+  unknown_unmapped_verifier_ids: string[];
 }
 
 export interface FlowPreviewResponse {
@@ -112,6 +128,7 @@ export interface FlowPreviewResponse {
   artifacts: FlowArtifactPreview[];
   verifier_checks: FlowVerifierCheckPreview[];
   risky_operations: FlowRiskyOperationPreview[];
+  verifier_catalog_coverage?: FlowVerifierCatalogCoveragePreview;
 }
 
 export type FlowPreviewApiWarning =
@@ -205,6 +222,9 @@ function parseFlowPreview(value: unknown): FlowPreviewResponse | null {
   const artifacts = parseArray(value.artifacts, parseArtifact);
   const verifierChecks = parseArray(value.verifier_checks, parseVerifierCheck);
   const riskyOperations = parseArray(value.risky_operations, parseRiskyOperation);
+  const verifierCatalogCoverage = Object.prototype.hasOwnProperty.call(value, 'verifier_catalog_coverage')
+    ? parseVerifierCatalogCoverage(value.verifier_catalog_coverage)
+    : undefined;
 
   if (
     typeof value.id !== 'string'
@@ -222,6 +242,7 @@ function parseFlowPreview(value: unknown): FlowPreviewResponse | null {
     || artifacts === null
     || verifierChecks === null
     || riskyOperations === null
+    || verifierCatalogCoverage === null
   ) {
     return null;
   }
@@ -242,6 +263,7 @@ function parseFlowPreview(value: unknown): FlowPreviewResponse | null {
     artifacts,
     verifier_checks: verifierChecks,
     risky_operations: riskyOperations,
+    ...(verifierCatalogCoverage === undefined ? {} : { verifier_catalog_coverage: verifierCatalogCoverage }),
   };
 }
 
@@ -434,16 +456,64 @@ function parseVerifierCheck(value: unknown): FlowVerifierCheckPreview | null {
   if (!isRecord(value)) return null;
   const phaseIds = parseStringArray(value.phase_ids);
   const required = readOptionalRequiredFlag(value.required);
+  const mappingStatus = readOptionalMappingStatus(value.mapping_status);
+  const catalogCheckId = readOptionalNullableString(value, 'catalog_check_id');
+  const catalogCheckName = readOptionalNullableString(value, 'catalog_check_name');
+  const catalogCheckCategory = readOptionalNullableString(value, 'catalog_check_category');
+  const catalogCheckType = readOptionalNullableString(value, 'catalog_check_type');
+  const catalogEvidenceRefTypes = Object.prototype.hasOwnProperty.call(value, 'catalog_evidence_ref_types')
+    ? parseStringArray(value.catalog_evidence_ref_types)
+    : undefined;
   if (
     typeof value.id !== 'string'
     || typeof value.type !== 'string'
     || typeof value.description !== 'string'
     || required === null
     || phaseIds === null
+    || mappingStatus === null
+    || catalogCheckId === INVALID_OPTIONAL_VALUE
+    || catalogCheckName === INVALID_OPTIONAL_VALUE
+    || catalogCheckCategory === INVALID_OPTIONAL_VALUE
+    || catalogCheckType === INVALID_OPTIONAL_VALUE
+    || catalogEvidenceRefTypes === null
   ) {
     return null;
   }
-  return { id: value.id, type: value.type, description: value.description, required, phase_ids: phaseIds };
+  return {
+    id: value.id,
+    type: value.type,
+    description: value.description,
+    required,
+    phase_ids: phaseIds,
+    ...(mappingStatus === undefined ? {} : { mapping_status: mappingStatus }),
+    ...(catalogCheckId === null ? { catalog_check_id: null } : catalogCheckId === undefined ? {} : { catalog_check_id: catalogCheckId }),
+    ...(catalogCheckName === null ? { catalog_check_name: null } : catalogCheckName === undefined ? {} : { catalog_check_name: catalogCheckName }),
+    ...(catalogCheckCategory === null ? { catalog_check_category: null } : catalogCheckCategory === undefined ? {} : { catalog_check_category: catalogCheckCategory }),
+    ...(catalogCheckType === null ? { catalog_check_type: null } : catalogCheckType === undefined ? {} : { catalog_check_type: catalogCheckType }),
+    ...(catalogEvidenceRefTypes === undefined ? {} : { catalog_evidence_ref_types: catalogEvidenceRefTypes }),
+  };
+}
+
+function parseVerifierCatalogCoverage(value: unknown): FlowVerifierCatalogCoveragePreview | null {
+  if (!isRecord(value)) return null;
+  const intentionalUnmappedVerifierIds = parseStringArray(value.intentional_unmapped_verifier_ids);
+  const unknownUnmappedVerifierIds = parseStringArray(value.unknown_unmapped_verifier_ids);
+  if (
+    !isNonNegativeInteger(value.verifier_count)
+    || !isNonNegativeInteger(value.mapped_count)
+    || !isNonNegativeInteger(value.unmapped_count)
+    || intentionalUnmappedVerifierIds === null
+    || unknownUnmappedVerifierIds === null
+  ) {
+    return null;
+  }
+  return {
+    verifier_count: value.verifier_count,
+    mapped_count: value.mapped_count,
+    unmapped_count: value.unmapped_count,
+    intentional_unmapped_verifier_ids: intentionalUnmappedVerifierIds,
+    unknown_unmapped_verifier_ids: unknownUnmappedVerifierIds,
+  };
 }
 
 function parseRiskyOperation(value: unknown): FlowRiskyOperationPreview | null {
@@ -467,6 +537,22 @@ function parseStringArray(value: unknown): string[] | null {
 function readNullableString(value: unknown): string | null | undefined {
   if (value === undefined || value === null) return null;
   return typeof value === 'string' ? value : undefined;
+}
+
+function readOptionalNullableString(
+  record: Record<string, unknown>,
+  key: string,
+): string | null | undefined | typeof INVALID_OPTIONAL_VALUE {
+  if (!Object.prototype.hasOwnProperty.call(record, key)) return undefined;
+  const value = record[key];
+  if (value === null) return null;
+  return typeof value === 'string' ? value : INVALID_OPTIONAL_VALUE;
+}
+
+function readOptionalMappingStatus(value: unknown): FlowVerifierCheckPreview['mapping_status'] | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'mapped' || value === 'intentional_unmapped' || value === 'unknown_unmapped') return value;
+  return null;
 }
 
 function readNullableNumber(value: unknown): number | null | undefined {
