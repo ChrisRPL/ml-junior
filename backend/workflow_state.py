@@ -4,6 +4,12 @@ from datetime import datetime
 from typing import Any
 
 from agent.core.events import AgentEvent
+from backend.budget_ledger import (
+    BudgetLimitRecord,
+    BudgetUsageRecord,
+    project_budget_limits,
+    project_budget_usage,
+)
 from backend.decision_proof_ledger import (
     project_decision_cards,
     project_proof_bundles,
@@ -128,6 +134,11 @@ def build_workflow_state(
     recorded_claim_links = _evidence_claim_links_from_events(session_id, unique_events)
     recorded_decision_cards = _decision_cards_from_events(session_id, unique_events)
     recorded_proof_bundles = _proof_bundles_from_events(session_id, unique_events)
+    recorded_budget_limits = _budget_limits_from_events(session_id, unique_events)
+    recorded_budget_usage = _budget_usage_from_events(session_id, unique_events)
+    missing_producers = _missing_producers(
+        budget_available=bool(recorded_budget_limits or recorded_budget_usage)
+    )
     recorded_verifier_verdicts = _verifier_verdicts_from_events(
         session_id,
         unique_events,
@@ -212,7 +223,10 @@ def build_workflow_state(
         active_jobs=active_job_refs,
         operation_refs=_operation_refs(operations or []),
         human_requests=recorded_human_requests,
-        budget=_budget_placeholder(),
+        budget=_budget_summary(
+            budget_limits=recorded_budget_limits,
+            budget_usage=recorded_budget_usage,
+        ),
         evidence_summary=_evidence_summary(
             artifact_refs=recorded_artifact_refs,
             metric_refs=recorded_metric_refs,
@@ -227,7 +241,7 @@ def build_workflow_state(
         resume=WorkflowResumeState(event_sequence=last_event_sequence),
         compatibility=WorkflowCompatibility(
             stale=stale,
-            missing_producers=list(_WORKFLOW_MISSING_PRODUCERS),
+            missing_producers=missing_producers,
         ),
         last_event_sequence=last_event_sequence,
         updated_at=updated_at,
@@ -519,6 +533,15 @@ def _operation_refs(operations: list[OperationRecord]) -> list[dict[str, Any]]:
     ]
 
 
+def _missing_producers(*, budget_available: bool) -> list[str]:
+    producers = list(_WORKFLOW_MISSING_PRODUCERS)
+    if budget_available:
+        producers = [
+            producer for producer in producers if producer != "budget_ledger"
+        ]
+    return producers
+
+
 def _active_job_refs_from_events(
     session_id: str,
     events: list[AgentEvent],
@@ -655,6 +678,20 @@ def _human_requests_from_events(
     ]
 
 
+def _budget_limits_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[BudgetLimitRecord]:
+    return project_budget_limits(session_id, events)
+
+
+def _budget_usage_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[BudgetUsageRecord]:
+    return project_budget_usage(session_id, events)
+
+
 def _ordered_session_events(
     session_id: str,
     events: list[AgentEvent],
@@ -679,6 +716,109 @@ def _budget_placeholder() -> dict[str, Any]:
         "used": None,
         "items": [],
     }
+
+
+def _budget_summary(
+    *,
+    budget_limits: list[BudgetLimitRecord],
+    budget_usage: list[BudgetUsageRecord],
+) -> dict[str, Any]:
+    if not budget_limits and not budget_usage:
+        return _budget_placeholder()
+
+    items = sorted(
+        [
+            *[
+                {
+                    "type": "limit",
+                    **record.model_dump(mode="json", exclude_none=True),
+                }
+                for record in budget_limits
+            ],
+            *[
+                {
+                    "type": "usage",
+                    **record.model_dump(mode="json", exclude_none=True),
+                }
+                for record in budget_usage
+            ],
+        ],
+        key=_budget_item_sort_key,
+    )
+    totals = _budget_totals(budget_limits=budget_limits, budget_usage=budget_usage)
+    exhausted = any(total["status"] == "exhausted" for total in totals)
+    single_total = totals[0] if len(totals) == 1 else None
+
+    return {
+        "source": "event",
+        "status": "exhausted" if exhausted else "active",
+        "currency": single_total["unit"] if single_total is not None else None,
+        "limit": single_total["limit"] if single_total is not None else None,
+        "used": single_total["used"] if single_total is not None else None,
+        "limit_count": len(budget_limits),
+        "usage_count": len(budget_usage),
+        "totals": totals,
+        "items": items,
+    }
+
+
+def _budget_totals(
+    *,
+    budget_limits: list[BudgetLimitRecord],
+    budget_usage: list[BudgetUsageRecord],
+) -> list[dict[str, Any]]:
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for record in budget_limits:
+        row = _budget_total_row(rows, resource=record.resource, unit=record.unit)
+        row["limit"] = (row["limit"] or 0) + record.limit
+        row["limit_count"] += 1
+
+    for record in budget_usage:
+        row = _budget_total_row(rows, resource=record.resource, unit=record.unit)
+        row["used"] += record.amount
+        row["usage_count"] += 1
+
+    totals = []
+    for row in rows.values():
+        limit = row["limit"]
+        used = row["used"]
+        exhausted = limit is not None and used >= limit
+        totals.append(
+            {
+                **row,
+                "remaining": None if limit is None else limit - used,
+                "status": "exhausted" if exhausted else "active",
+            }
+        )
+    return sorted(totals, key=lambda row: (row["resource"], row["unit"]))
+
+
+def _budget_total_row(
+    rows: dict[tuple[str, str], dict[str, Any]],
+    *,
+    resource: str,
+    unit: str,
+) -> dict[str, Any]:
+    key = (resource, unit)
+    if key not in rows:
+        rows[key] = {
+            "resource": resource,
+            "unit": unit,
+            "limit": None,
+            "used": 0,
+            "limit_count": 0,
+            "usage_count": 0,
+        }
+    return rows[key]
+
+
+def _budget_item_sort_key(item: dict[str, Any]) -> tuple[int, str]:
+    sequence = item.get("source_event_sequence")
+    if isinstance(sequence, int):
+        sort_sequence = sequence
+    else:
+        sort_sequence = 0
+    return (sort_sequence, repr(sorted(item.items())))
 
 
 def _evidence_summary(

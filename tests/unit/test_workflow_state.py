@@ -3,6 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from agent.core.events import AgentEvent
+from backend.budget_ledger import (
+    BUDGET_LIMIT_RECORDED_EVENT,
+    BUDGET_USAGE_RECORDED_EVENT,
+    BudgetLimitRecord,
+    BudgetUsageRecord,
+    budget_limit_recorded_payload,
+    budget_usage_recorded_payload,
+)
 from backend.decision_proof_ledger import (
     DECISION_CARD_RECORDED_EVENT,
     PROOF_BUNDLE_RECORDED_EVENT,
@@ -179,6 +187,83 @@ def make_human_request_event(
         session_id=session_id,
         data=payload,
     )
+
+
+def make_budget_limit_recorded_event(
+    *,
+    sequence: int,
+    limit_id: str = "budget-limit-1",
+    resource: str = "llm_cost",
+    limit: float = 25.0,
+    unit: str = "usd",
+    session_id: str = "session-a",
+    event_id: str | None = None,
+) -> AgentEvent:
+    record = BudgetLimitRecord.model_validate(
+        {
+            "session_id": session_id,
+            "limit_id": limit_id,
+            "source_event_sequence": sequence,
+            "scope": "session",
+            "scope_id": session_id,
+            "resource": resource,
+            "limit": limit,
+            "unit": unit,
+            "period": "session",
+            "source": "flow_template",
+            "metadata": {"template_id": "fine-tune-model"},
+            "privacy_class": "private",
+            "redaction_status": "none",
+            "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        }
+    )
+    return make_event(
+        sequence=sequence,
+        event_type=BUDGET_LIMIT_RECORDED_EVENT,
+        session_id=session_id,
+        data=budget_limit_recorded_payload(record),
+    ).model_copy(update={"id": event_id or f"event-budget-limit-{sequence}"})
+
+
+def make_budget_usage_recorded_event(
+    *,
+    sequence: int,
+    usage_id: str = "budget-usage-1",
+    resource: str = "llm_cost",
+    amount: float = 5.0,
+    unit: str = "usd",
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    limit_id: str | None = "budget-limit-1",
+) -> AgentEvent:
+    record = BudgetUsageRecord.model_validate(
+        {
+            "session_id": session_id,
+            "usage_id": usage_id,
+            "source_event_sequence": sequence,
+            "scope": "session",
+            "scope_id": session_id,
+            "resource": resource,
+            "amount": amount,
+            "unit": unit,
+            "source": "provider_usage",
+            "provider": "huggingface_jobs",
+            "limit_id": limit_id,
+            "tool_call_id": f"tc-{sequence}",
+            "job_id": f"job-{sequence}",
+            "occurred_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+            "metadata": {"hardware": "cpu-basic"},
+            "privacy_class": "private",
+            "redaction_status": "partial",
+            "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        }
+    )
+    return make_event(
+        sequence=sequence,
+        event_type=BUDGET_USAGE_RECORDED_EVENT,
+        session_id=session_id,
+        data=budget_usage_recorded_payload(record),
+    ).model_copy(update={"id": event_id or f"event-budget-usage-{sequence}"})
 
 
 def make_metric_recorded_event(
@@ -705,6 +790,145 @@ def test_empty_workflow_state_preserves_evidence_summary_placeholder():
     }
     assert "decision_card_count" not in state.evidence_summary
     assert "proof_bundle_count" not in state.evidence_summary
+
+
+def test_workflow_budget_placeholder_is_preserved_without_budget_events():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[make_event(sequence=1, event_type="plan_update", data={"plan": []})],
+    )
+
+    assert state.budget == {
+        "source": "placeholder",
+        "status": "placeholder",
+        "currency": None,
+        "limit": None,
+        "used": None,
+        "items": [],
+    }
+
+
+def test_budget_events_project_into_workflow_budget_totals_and_order():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_budget_usage_recorded_event(
+                sequence=4,
+                usage_id="usage-gpu-2",
+                resource="gpu_time",
+                amount=0.75,
+                unit="gpu_hours",
+                limit_id="limit-gpu",
+            ),
+            make_budget_limit_recorded_event(
+                sequence=6,
+                limit_id="limit-other-session",
+                session_id="session-b",
+            ),
+            make_budget_limit_recorded_event(
+                sequence=1,
+                limit_id="limit-gpu",
+                resource="gpu_time",
+                limit=2.0,
+                unit="gpu_hours",
+            ),
+            make_budget_usage_recorded_event(
+                sequence=3,
+                usage_id="usage-gpu-1",
+                resource="gpu_time",
+                amount=0.25,
+                unit="gpu_hours",
+                limit_id="limit-gpu",
+            ),
+            make_budget_limit_recorded_event(
+                sequence=5,
+                limit_id="limit-llm",
+                resource="llm_cost",
+                limit=25.0,
+                unit="usd",
+            ),
+        ],
+    )
+
+    assert state.budget["source"] == "event"
+    assert state.budget["status"] == "active"
+    assert state.budget["currency"] is None
+    assert state.budget["limit"] is None
+    assert state.budget["used"] is None
+    assert state.budget["limit_count"] == 2
+    assert state.budget["usage_count"] == 2
+    assert "budget_ledger" not in state.compatibility.missing_producers
+    assert [
+        (item["type"], item.get("usage_id") or item.get("limit_id"))
+        for item in state.budget["items"]
+    ] == [
+        ("limit", "limit-gpu"),
+        ("usage", "usage-gpu-1"),
+        ("usage", "usage-gpu-2"),
+        ("limit", "limit-llm"),
+    ]
+    assert state.budget["totals"] == [
+        {
+            "resource": "gpu_time",
+            "unit": "gpu_hours",
+            "limit": 2.0,
+            "used": 1.0,
+            "limit_count": 1,
+            "usage_count": 2,
+            "remaining": 1.0,
+            "status": "active",
+        },
+        {
+            "resource": "llm_cost",
+            "unit": "usd",
+            "limit": 25.0,
+            "used": 0,
+            "limit_count": 1,
+            "usage_count": 0,
+            "remaining": 25.0,
+            "status": "active",
+        },
+    ]
+
+
+def test_budget_status_marks_exhausted_from_recorded_limit_and_usage():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_budget_limit_recorded_event(
+                sequence=1,
+                limit_id="limit-gpu",
+                resource="gpu_time",
+                limit=1.0,
+                unit="gpu_hours",
+            ),
+            make_budget_usage_recorded_event(
+                sequence=2,
+                usage_id="usage-gpu",
+                resource="gpu_time",
+                amount=1.25,
+                unit="gpu_hours",
+                limit_id="limit-gpu",
+            ),
+        ],
+    )
+
+    assert state.budget["status"] == "exhausted"
+    assert state.budget["currency"] == "gpu_hours"
+    assert state.budget["limit"] == 1.0
+    assert state.budget["used"] == 1.25
+    assert state.budget["totals"] == [
+        {
+            "resource": "gpu_time",
+            "unit": "gpu_hours",
+            "limit": 1.0,
+            "used": 1.25,
+            "limit_count": 1,
+            "usage_count": 1,
+            "remaining": -0.25,
+            "status": "exhausted",
+        }
+    ]
 
 
 def test_artifact_ref_recorded_projects_explicit_refs_into_evidence_summary():
