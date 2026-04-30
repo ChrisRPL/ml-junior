@@ -50,6 +50,45 @@ async def test_flow_catalog_route_lists_every_builtin_without_session_runtime(
         assert item["required_inputs"]
 
 
+async def test_flow_catalog_route_supports_builtin_source_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(agent_routes, "session_manager", object())
+
+    catalog = await agent_routes.list_flows({"user_id": "dev"}, source="builtin")
+    payload = [item.model_dump() for item in catalog]
+
+    assert [item["id"] for item in payload] == EXPECTED_BUILTIN_IDS
+    assert {item["template_source"]["kind"] for item in payload} == {"builtin"}
+
+
+@pytest.mark.parametrize("source", ["custom", "community"])
+async def test_flow_catalog_route_returns_empty_for_supported_future_sources(
+    source: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(agent_routes, "session_manager", object())
+
+    catalog = await agent_routes.list_flows({"user_id": "dev"}, source=source)
+
+    assert catalog == []
+
+
+async def test_flow_catalog_route_rejects_unsupported_sources() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_routes.list_flows({"user_id": "dev"}, source="remote")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "error": "unsupported_flow_template_source",
+        "source": "remote",
+        "message": (
+            "Unsupported flow template source 'remote'; "
+            "supported sources: builtin, custom, community"
+        ),
+    }
+
+
 @pytest.mark.parametrize("template_id", EXPECTED_BUILTIN_IDS)
 async def test_flow_preview_route_returns_full_read_only_contract(
     template_id: str,

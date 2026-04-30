@@ -633,17 +633,20 @@ class VerifierVerdictRecord(VerifierLedgerModel):
 
 
 class FlowTemplateMetadata(BaseModel):
-    """Derived catalog metadata for a built-in flow template."""
+    """Derived catalog metadata for a flow template."""
 
     category: str
     tags: list[str]
     runtime_class: str
 
 
-class FlowTemplateSourceMetadata(BaseModel):
-    """Source metadata for a built-in flow template."""
+FlowTemplateSourceKind = Literal["builtin", "custom", "community"]
 
-    kind: Literal["builtin"]
+
+class FlowTemplateSourceMetadata(BaseModel):
+    """Source metadata for a flow template."""
+
+    kind: FlowTemplateSourceKind
     path: str
     schema_version: str
     template_version: str

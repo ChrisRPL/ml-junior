@@ -33,11 +33,12 @@ from models import (
     WorkflowState,
 )
 from backend.flow_templates import (
+    FlowTemplateError,
     FlowTemplateNotFoundError,
     build_flow_catalog_item,
     build_flow_preview,
     get_builtin_flow_template,
-    list_builtin_flow_templates,
+    list_flow_templates,
 )
 from session_manager import (
     MAX_SESSIONS,
@@ -282,11 +283,23 @@ async def get_model() -> dict:
 @router.get("/flows", response_model=list[FlowCatalogItem])
 async def list_flows(
     _user: dict = Depends(get_current_user),
+    source: str | None = None,
 ) -> list[FlowCatalogItem]:
-    """Return the read-only built-in flow catalog."""
+    """Return the read-only flow catalog."""
+    try:
+        templates = list_flow_templates(source)
+    except FlowTemplateError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "unsupported_flow_template_source",
+                "source": source,
+                "message": str(exc),
+            },
+        ) from exc
     return [
         FlowCatalogItem(**build_flow_catalog_item(template))
-        for template in list_builtin_flow_templates()
+        for template in templates
     ]
 
 

@@ -13,6 +13,7 @@ from backend.flow_templates import (
     get_builtin_flow_template,
     load_flow_template,
     list_builtin_flow_templates,
+    list_flow_templates,
     parse_flow_template,
 )
 
@@ -99,7 +100,18 @@ def test_parser_accepts_dicts() -> None:
     template = parse_flow_template(raw)
 
     assert template.id == "mnist-baseline"
+    assert template.source == "builtin"
     assert template.phases[0].approval_points == ["gpu-run"]
+
+
+@pytest.mark.parametrize("source", ["builtin", "custom", "community"])
+def test_parser_accepts_supported_template_sources(source: str) -> None:
+    raw = json.loads((FIXTURE_DIR / "valid_v1.json").read_text())
+    raw["source"] = source
+
+    template = parse_flow_template(raw)
+
+    assert template.source == source
 
 
 def test_builtin_templates_have_stable_ids_and_validate() -> None:
@@ -115,6 +127,7 @@ def test_builtin_templates_have_stable_ids_and_validate() -> None:
 
     for template in templates:
         assert template.version == "v1"
+        assert template.source == "builtin"
         assert template.inputs
         assert any(input_.required for input_ in template.inputs)
         assert template.permissions
@@ -152,6 +165,23 @@ def test_builtin_template_catalog_items_include_derived_metadata() -> None:
         assert item["required_inputs"]
         assert item["approval_point_count"] > 0
         assert item["verifier_count"] > 0
+
+
+def test_flow_template_source_filter_lists_builtin_only_for_now() -> None:
+    assert [template.id for template in list_flow_templates()] == EXPECTED_BUILTIN_IDS
+    assert [
+        template.id for template in list_flow_templates("builtin")
+    ] == EXPECTED_BUILTIN_IDS
+    assert list_flow_templates("custom") == []
+    assert list_flow_templates("community") == []
+
+
+def test_flow_template_source_filter_rejects_unsupported_sources() -> None:
+    with pytest.raises(
+        FlowTemplateError,
+        match="Unsupported flow template source 'remote'",
+    ):
+        list_flow_templates("remote")
 
 
 @pytest.mark.parametrize("template_id", EXPECTED_BUILTIN_IDS)

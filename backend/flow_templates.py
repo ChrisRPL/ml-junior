@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -28,6 +28,12 @@ PhaseStatus = Literal[
     "failed",
 ]
 VerifierType = Literal["manual", "metric", "artifact", "command", "llm"]
+FlowTemplateSource = Literal["builtin", "custom", "community"]
+SUPPORTED_FLOW_TEMPLATE_SOURCES: tuple[FlowTemplateSource, ...] = (
+    "builtin",
+    "custom",
+    "community",
+)
 
 
 class FlowTemplateError(ValueError):
@@ -101,6 +107,7 @@ class FlowTemplate(_TemplateModel):
     id: str
     name: str
     version: Literal["v1"]
+    source: FlowTemplateSource = "builtin"
     description: str | None = None
     inputs: list[TemplateInput] = Field(default_factory=list)
     budgets: TemplateBudgets = Field(default_factory=TemplateBudgets)
@@ -261,6 +268,18 @@ def load_flow_template(path: str | Path) -> FlowTemplate:
 def list_builtin_flow_templates() -> list[FlowTemplate]:
     """Load all built-in flow templates in stable id order."""
     return [load_flow_template(path) for path in _builtin_template_paths()]
+
+
+def list_flow_templates(source: str | None = None) -> list[FlowTemplate]:
+    """Load read-only flow templates for a source.
+
+    Custom and community sources are reserved for future catalog backends; they
+    are intentionally empty here and do not load from user paths or remotes.
+    """
+    template_source = _normalize_template_source(source)
+    if template_source in {None, "builtin"}:
+        return list_builtin_flow_templates()
+    return []
 
 
 def get_builtin_flow_template(template_id: str) -> FlowTemplate:
@@ -428,20 +447,37 @@ def _response_metadata(template_id: str) -> dict[str, Any]:
 
 
 def _template_source_metadata(template: FlowTemplate) -> dict[str, str]:
-    path = BUILTIN_FLOW_TEMPLATE_DIR / f"{template.id}.json"
-    try:
-        relative_path = path.relative_to(Path(__file__).resolve().parent.parent)
-    except ValueError:
-        source_path = path.as_posix()
-    else:
-        source_path = relative_path.as_posix()
+    source_path = ""
+    if template.source == "builtin":
+        source_path = _builtin_template_source_path(template.id)
 
     return {
-        "kind": "builtin",
+        "kind": template.source,
         "path": source_path,
         "schema_version": SUPPORTED_SCHEMA_VERSION,
         "template_version": template.version,
     }
+
+
+def _builtin_template_source_path(template_id: str) -> str:
+    path = BUILTIN_FLOW_TEMPLATE_DIR / f"{template_id}.json"
+    try:
+        relative_path = path.relative_to(Path(__file__).resolve().parent.parent)
+    except ValueError:
+        return path.as_posix()
+    return relative_path.as_posix()
+
+
+def _normalize_template_source(source: str | None) -> FlowTemplateSource | None:
+    if source is None:
+        return None
+    if source in SUPPORTED_FLOW_TEMPLATE_SOURCES:
+        return cast(FlowTemplateSource, source)
+    supported = ", ".join(SUPPORTED_FLOW_TEMPLATE_SOURCES)
+    raise FlowTemplateError(
+        f"Unsupported flow template source {source!r}; "
+        f"supported sources: {supported}"
+    )
 
 
 def _phase_ids_by_reference(
@@ -555,11 +591,13 @@ def _format_validation_error(exc: ValidationError) -> str:
 __all__ = [
     "ApprovalPoint",
     "ArtifactSpec",
+    "FlowTemplateSource",
     "FlowTemplate",
     "FlowTemplateError",
     "FlowTemplateNotFoundError",
     "RequiredOutput",
     "SUPPORTED_SCHEMA_VERSION",
+    "SUPPORTED_FLOW_TEMPLATE_SOURCES",
     "TemplateBudgets",
     "TemplateInput",
     "TemplatePhase",
@@ -569,5 +607,6 @@ __all__ = [
     "get_builtin_flow_template",
     "load_flow_template",
     "list_builtin_flow_templates",
+    "list_flow_templates",
     "parse_flow_template",
 ]
