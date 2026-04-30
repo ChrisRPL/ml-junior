@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -79,6 +79,25 @@ class VerifierCheckCatalogEntry(_CatalogModel):
     required: bool = True
 
 
+class VerifierCheckCatalogCount(_CatalogModel):
+    """Deterministic count bucket for a verifier check catalog dimension."""
+
+    value: NonEmptyStr
+    count: int = Field(ge=0)
+
+
+class VerifierCheckCatalogSummary(_CatalogModel):
+    """Read-only summary of verifier checklist catalog coverage."""
+
+    total_checks: int = Field(ge=0)
+    required_checks: int = Field(ge=0)
+    optional_checks: int = Field(ge=0)
+    ordered_check_ids: tuple[VerifierCheckId, ...]
+    category_counts: tuple[VerifierCheckCatalogCount, ...]
+    check_type_counts: tuple[VerifierCheckCatalogCount, ...]
+    verdict_status_counts: tuple[VerifierCheckCatalogCount, ...]
+
+
 CHECK_CODE_EXECUTION_OBSERVED = "code-execution-observed"
 CHECK_DATASET_LOADED = "dataset-loaded"
 CHECK_SPLIT_CORRECTNESS = "split-correctness"
@@ -99,6 +118,27 @@ BUILTIN_VERIFIER_CHECK_IDS: tuple[str, ...] = (
     CHECK_FINAL_CLAIMS_TIED_TO_EVIDENCE,
     CHECK_MODEL_CARD_GENERATED_WHEN_REQUIRED,
     CHECK_ARTIFACTS_AVAILABLE,
+)
+
+_CHECK_CATEGORY_ORDER: tuple[CheckCategory, ...] = (
+    "execution",
+    "data",
+    "evaluation",
+    "reproducibility",
+    "reporting",
+    "artifacts",
+)
+_CHECK_TYPE_ORDER: tuple[VerifierCheckType, ...] = (
+    "manual",
+    "artifact",
+    "metric",
+    "command",
+    "llm",
+)
+_VERDICT_STATUS_ORDER: tuple[VerifierCheckStatus, ...] = (
+    "passed",
+    "failed",
+    "inconclusive",
 )
 
 _BUILTIN_VERIFIER_CHECKS: tuple[VerifierCheckCatalogEntry, ...] = (
@@ -335,6 +375,42 @@ def get_builtin_verifier_check(check_id: str) -> VerifierCheckCatalogEntry:
     )
 
 
+def summarize_builtin_verifier_check_catalog() -> VerifierCheckCatalogSummary:
+    """Return deterministic read-only summary counts for the built-in catalog."""
+    return summarize_verifier_check_catalog(BUILTIN_VERIFIER_CHECK_CATALOG)
+
+
+def summarize_verifier_check_catalog(
+    entries: Sequence[VerifierCheckCatalogEntry | dict[str, object]],
+) -> VerifierCheckCatalogSummary:
+    """Summarize verifier check catalog entries without executing checks."""
+    catalog = validate_verifier_check_catalog(entries)
+    required_checks = sum(1 for entry in catalog if entry.required)
+
+    return VerifierCheckCatalogSummary(
+        total_checks=len(catalog),
+        required_checks=required_checks,
+        optional_checks=len(catalog) - required_checks,
+        ordered_check_ids=tuple(entry.check_id for entry in catalog),
+        category_counts=_count_entries(
+            _CHECK_CATEGORY_ORDER,
+            (entry.category for entry in catalog),
+        ),
+        check_type_counts=_count_entries(
+            _CHECK_TYPE_ORDER,
+            (entry.check_type for entry in catalog),
+        ),
+        verdict_status_counts=_count_entries(
+            _VERDICT_STATUS_ORDER,
+            (
+                verdict_status
+                for entry in catalog
+                for verdict_status in entry.verdict_statuses
+            ),
+        ),
+    )
+
+
 def _reject_duplicate_check_ids(entries: Sequence[VerifierCheckCatalogEntry]) -> None:
     seen: set[str] = set()
     for entry in entries:
@@ -343,6 +419,20 @@ def _reject_duplicate_check_ids(entries: Sequence[VerifierCheckCatalogEntry]) ->
                 f"duplicate verifier check id: {entry.check_id}"
             )
         seen.add(entry.check_id)
+
+
+def _count_entries(
+    ordered_values: Sequence[str],
+    values: Iterable[str],
+) -> tuple[VerifierCheckCatalogCount, ...]:
+    observed = tuple(values)
+    return tuple(
+        VerifierCheckCatalogCount(
+            value=value,
+            count=sum(1 for item in observed if item == value),
+        )
+        for value in ordered_values
+    )
 
 
 BUILTIN_VERIFIER_CHECK_CATALOG: tuple[VerifierCheckCatalogEntry, ...] = (

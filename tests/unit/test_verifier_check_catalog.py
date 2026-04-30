@@ -20,6 +20,8 @@ from backend.verifier_check_catalog import (
     VerifierCheckEvidenceRequirement,
     get_builtin_verifier_check,
     list_builtin_verifier_checks,
+    summarize_builtin_verifier_check_catalog,
+    summarize_verifier_check_catalog,
     validate_verifier_check_catalog,
 )
 
@@ -80,6 +82,79 @@ def test_get_helper_returns_catalog_entry_and_unknown_id_fails() -> None:
         match="Unknown built-in verifier check: missing-check",
     ):
         get_builtin_verifier_check("missing-check")
+
+
+def test_builtin_summary_helper_returns_stable_counts() -> None:
+    summary = summarize_builtin_verifier_check_catalog()
+
+    assert summary.total_checks == 9
+    assert summary.required_checks == 9
+    assert summary.optional_checks == 0
+    assert summary.ordered_check_ids == tuple(EXPECTED_BUILTIN_CHECK_IDS)
+    assert {
+        count.value: count.count for count in summary.category_counts
+    } == {
+        "execution": 1,
+        "data": 2,
+        "evaluation": 2,
+        "reproducibility": 1,
+        "reporting": 2,
+        "artifacts": 1,
+    }
+    assert [count.value for count in summary.category_counts] == [
+        "execution",
+        "data",
+        "evaluation",
+        "reproducibility",
+        "reporting",
+        "artifacts",
+    ]
+    assert {
+        count.value: count.count for count in summary.check_type_counts
+    } == {
+        "manual": 0,
+        "artifact": 5,
+        "metric": 2,
+        "command": 1,
+        "llm": 1,
+    }
+    assert {
+        count.value: count.count for count in summary.verdict_status_counts
+    } == {
+        "passed": 9,
+        "failed": 9,
+        "inconclusive": 9,
+    }
+    with pytest.raises(ValidationError):
+        summary.total_checks = 0
+
+
+def test_summary_helper_validates_and_orders_synthetic_catalog() -> None:
+    first = make_entry(check_id="synthetic-a", order=20)
+    second = make_entry(check_id="synthetic-b", order=10)
+
+    summary = summarize_verifier_check_catalog([first, second])
+
+    assert summary.total_checks == 2
+    assert summary.ordered_check_ids == ("synthetic-b", "synthetic-a")
+    assert {
+        count.value: count.count for count in summary.category_counts
+    }["execution"] == 2
+    assert {
+        count.value: count.count for count in summary.check_type_counts
+    }["manual"] == 2
+    assert {
+        count.value: count.count for count in summary.verdict_status_counts
+    } == {
+        "passed": 2,
+        "failed": 2,
+        "inconclusive": 2,
+    }
+
+    with pytest.raises(VerifierCheckCatalogError, match="duplicate verifier check id"):
+        summarize_verifier_check_catalog(
+            [first, make_entry(check_id="synthetic-a", order=30)]
+        )
 
 
 def test_catalog_covers_ml_verifier_checklist_surfaces() -> None:
