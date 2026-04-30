@@ -4,6 +4,12 @@ from datetime import datetime
 from typing import Any
 
 from agent.core.events import AgentEvent
+from backend.evidence_ledger import (
+    EVIDENCE_CLAIM_LINK_RECORDED_EVENT,
+    EVIDENCE_ITEM_RECORDED_EVENT,
+    evidence_claim_link_record_from_event,
+    evidence_item_record_from_event,
+)
 from backend.experiment_ledger import project_log_refs, project_metrics
 from backend.job_artifact_refs import project_active_jobs, project_artifact_refs
 from backend.operation_store import OperationRecord
@@ -104,6 +110,8 @@ def build_workflow_state(
     recorded_artifact_refs = _artifact_refs_from_events(session_id, unique_events)
     recorded_metric_refs = _metric_refs_from_events(session_id, unique_events)
     recorded_log_refs = _log_refs_from_events(session_id, unique_events)
+    recorded_evidence_items = _evidence_items_from_events(session_id, unique_events)
+    recorded_claim_links = _evidence_claim_links_from_events(session_id, unique_events)
     phase_projection: PhaseState | None = None
     phase_started_at: dict[str, str | None] = {}
     phase_blockers: list[dict[str, Any]] = []
@@ -188,6 +196,8 @@ def build_workflow_state(
             artifact_refs=recorded_artifact_refs,
             metric_refs=recorded_metric_refs,
             log_refs=recorded_log_refs,
+            evidence_items=recorded_evidence_items,
+            claim_links=recorded_claim_links,
         ),
         live_tracking_refs=[_live_tracking_placeholder(session_id)],
         resume=WorkflowResumeState(event_sequence=last_event_sequence),
@@ -528,6 +538,59 @@ def _log_refs_from_events(
     ]
 
 
+def _evidence_items_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    latest: dict[str, tuple[tuple[int, str], dict[str, Any]]] = {}
+    for event in _ordered_session_events(
+        session_id,
+        events,
+        EVIDENCE_ITEM_RECORDED_EVENT,
+    ):
+        record = evidence_item_record_from_event(event)
+        latest[record.evidence_id] = (
+            (event.sequence, str(event.id)),
+            record.model_dump(mode="json", exclude_none=True),
+        )
+
+    return [record for _, record in sorted(latest.values(), key=lambda value: value[0])]
+
+
+def _evidence_claim_links_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    latest: dict[str, tuple[tuple[int, str], dict[str, Any]]] = {}
+    for event in _ordered_session_events(
+        session_id,
+        events,
+        EVIDENCE_CLAIM_LINK_RECORDED_EVENT,
+    ):
+        record = evidence_claim_link_record_from_event(event)
+        latest[record.link_id] = (
+            (event.sequence, str(event.id)),
+            record.model_dump(mode="json", exclude_none=True),
+        )
+
+    return [record for _, record in sorted(latest.values(), key=lambda value: value[0])]
+
+
+def _ordered_session_events(
+    session_id: str,
+    events: list[AgentEvent],
+    event_type: str,
+) -> list[AgentEvent]:
+    return sorted(
+        [
+            event
+            for event in events
+            if event.session_id == session_id and event.event_type == event_type
+        ],
+        key=lambda event: (event.sequence, str(event.id)),
+    )
+
+
 def _budget_placeholder() -> dict[str, Any]:
     return {
         "source": "placeholder",
@@ -544,18 +607,26 @@ def _evidence_summary(
     artifact_refs: list[dict[str, Any]],
     metric_refs: list[dict[str, Any]],
     log_refs: list[dict[str, Any]],
+    evidence_items: list[dict[str, Any]],
+    claim_links: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    if not artifact_refs and not metric_refs and not log_refs:
-        return _evidence_summary_placeholder()
+    if not artifact_refs and not metric_refs and not log_refs and not evidence_items:
+        if not claim_links:
+            return _evidence_summary_placeholder()
 
     items = sorted(
-        [*artifact_refs, *metric_refs, *log_refs],
+        [*artifact_refs, *metric_refs, *log_refs, *evidence_items, *claim_links],
         key=_evidence_item_sort_key,
     )
+    if not items:
+        return _evidence_summary_placeholder()
+
     return {
         "source": "event",
         "status": "available",
-        "claim_count": 0,
+        "claim_count": len(claim_links),
+        "claim_link_count": len(claim_links),
+        "evidence_count": len(evidence_items),
         "artifact_count": len(artifact_refs),
         "metric_count": len(metric_refs),
         "log_count": len(log_refs),
@@ -577,6 +648,8 @@ def _evidence_summary_placeholder() -> dict[str, Any]:
         "source": "placeholder",
         "status": "placeholder",
         "claim_count": 0,
+        "claim_link_count": 0,
+        "evidence_count": 0,
         "artifact_count": 0,
         "metric_count": 0,
         "log_count": 0,

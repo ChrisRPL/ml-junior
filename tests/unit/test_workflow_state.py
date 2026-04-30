@@ -3,6 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from agent.core.events import AgentEvent
+from backend.evidence_ledger import (
+    EVIDENCE_CLAIM_LINK_RECORDED_EVENT,
+    EVIDENCE_ITEM_RECORDED_EVENT,
+)
 from backend.event_store import SQLiteEventStore
 from backend.experiment_ledger import LOG_REF_RECORDED_EVENT, METRIC_RECORDED_EVENT
 from backend.job_artifact_refs import (
@@ -162,6 +166,73 @@ def make_log_ref_recorded_event(
             "label": label,
         },
     ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
+def make_evidence_item_recorded_event(
+    *,
+    sequence: int,
+    evidence_id: str = "evidence-1",
+    title: str = "Validation accuracy evidence",
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    return make_event(
+        sequence=sequence,
+        event_type=EVIDENCE_ITEM_RECORDED_EVENT,
+        session_id=session_id,
+        data={
+            "session_id": session_id,
+            "evidence_id": evidence_id,
+            "source_event_sequence": source_event_sequence or sequence,
+            "kind": "metric",
+            "source": "metric",
+            "title": title,
+            "summary": "Accuracy improved over baseline",
+            "metric_id": "metric-1",
+            "metadata": {"split": "validation"},
+            "privacy_class": "private",
+            "redaction_status": "none",
+            "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        },
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
+def make_evidence_claim_link_recorded_event(
+    *,
+    sequence: int,
+    link_id: str = "evidence-link-1",
+    evidence_id: str = "evidence-1",
+    claim_id: str = "claim-1",
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    return make_event(
+        sequence=sequence,
+        event_type=EVIDENCE_CLAIM_LINK_RECORDED_EVENT,
+        session_id=session_id,
+        data={
+            "session_id": session_id,
+            "link_id": link_id,
+            "claim_id": claim_id,
+            "evidence_id": evidence_id,
+            "source_event_sequence": source_event_sequence or sequence,
+            "relation": "supports",
+            "strength": "strong",
+            "rationale": "Metric exceeds baseline.",
+            "metadata": {"reviewed_by": "synthetic-fixture"},
+            "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+        },
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
+def _summary_item_id(item: dict) -> str | None:
+    if "link_id" in item:
+        return item.get("link_id")
+    if "evidence_id" in item and "kind" in item:
+        return item.get("evidence_id")
+    return item.get("artifact_id") or item.get("metric_id") or item.get("log_id")
 
 
 def test_plan_update_projects_latest_plan_items():
@@ -356,6 +427,8 @@ def test_artifact_ref_recorded_projects_explicit_refs_into_evidence_summary():
     assert state.evidence_summary["status"] == "available"
     assert state.evidence_summary["artifact_count"] == 2
     assert state.evidence_summary["claim_count"] == 0
+    assert state.evidence_summary["claim_link_count"] == 0
+    assert state.evidence_summary["evidence_count"] == 0
     assert state.evidence_summary["metric_count"] == 0
     assert state.evidence_summary["log_count"] == 0
     assert [
@@ -403,6 +476,40 @@ def test_metric_and_log_ref_recorded_project_into_evidence_summary():
     assert state.evidence_summary["items"][1]["label"] == "train stdout"
 
 
+def test_evidence_item_and_claim_link_recorded_project_into_evidence_summary():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_evidence_item_recorded_event(
+                sequence=1,
+                evidence_id="evidence-accuracy",
+                title="Accuracy threshold evidence",
+            ),
+            make_evidence_claim_link_recorded_event(
+                sequence=2,
+                link_id="evidence-link-accuracy",
+                evidence_id="evidence-accuracy",
+                claim_id="claim-accuracy",
+            ),
+        ],
+    )
+
+    assert state.evidence_summary["source"] == "event"
+    assert state.evidence_summary["status"] == "available"
+    assert state.evidence_summary["evidence_count"] == 1
+    assert state.evidence_summary["claim_count"] == 1
+    assert state.evidence_summary["claim_link_count"] == 1
+    assert state.evidence_summary["artifact_count"] == 0
+    assert state.evidence_summary["metric_count"] == 0
+    assert state.evidence_summary["log_count"] == 0
+    assert [
+        _summary_item_id(item)
+        for item in state.evidence_summary["items"]
+    ] == ["evidence-accuracy", "evidence-link-accuracy"]
+    assert state.evidence_summary["items"][0]["title"] == "Accuracy threshold evidence"
+    assert state.evidence_summary["items"][1]["link_id"] == "evidence-link-accuracy"
+
+
 def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
     state = build_workflow_state(
         session_id="session-a",
@@ -427,6 +534,17 @@ def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
                 log_id="log-b",
                 session_id="session-b",
             ),
+            make_evidence_item_recorded_event(
+                sequence=5,
+                evidence_id="evidence-b",
+                session_id="session-b",
+            ),
+            make_evidence_claim_link_recorded_event(
+                sequence=6,
+                link_id="evidence-link-b",
+                evidence_id="evidence-b",
+                session_id="session-b",
+            ),
         ],
     )
 
@@ -435,6 +553,8 @@ def test_recorded_job_and_artifact_events_from_other_sessions_are_ignored():
         "source": "placeholder",
         "status": "placeholder",
         "claim_count": 0,
+        "claim_link_count": 0,
+        "evidence_count": 0,
         "artifact_count": 0,
         "metric_count": 0,
         "log_count": 0,
@@ -466,6 +586,15 @@ def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic()
     )
     metric = make_metric_recorded_event(sequence=5, metric_id="metric-1")
     log_ref = make_log_ref_recorded_event(sequence=6, log_id="log-1")
+    evidence_item = make_evidence_item_recorded_event(
+        sequence=7,
+        evidence_id="evidence-1",
+    )
+    claim_link = make_evidence_claim_link_recorded_event(
+        sequence=8,
+        link_id="evidence-link-1",
+        evidence_id="evidence-1",
+    )
 
     state = build_workflow_state(
         session_id="session-a",
@@ -480,6 +609,10 @@ def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic()
             metric.model_copy(),
             log_ref,
             log_ref.model_copy(),
+            evidence_item,
+            evidence_item.model_copy(),
+            claim_link,
+            claim_link.model_copy(),
         ],
     )
 
@@ -489,11 +622,56 @@ def test_duplicate_replayed_recorded_job_and_artifact_events_are_deterministic()
     assert state.evidence_summary["artifact_count"] == 1
     assert state.evidence_summary["metric_count"] == 1
     assert state.evidence_summary["log_count"] == 1
+    assert state.evidence_summary["evidence_count"] == 1
+    assert state.evidence_summary["claim_count"] == 1
+    assert state.evidence_summary["claim_link_count"] == 1
     assert [
-        item.get("artifact_id") or item.get("metric_id") or item.get("log_id")
+        _summary_item_id(item)
         for item in state.evidence_summary["items"]
-    ] == ["artifact-1", "metric-1", "log-1"]
+    ] == ["artifact-1", "metric-1", "log-1", "evidence-1", "evidence-link-1"]
     assert state.evidence_summary["items"][0]["label"] == "Final checkpoint"
+
+
+def test_duplicate_evidence_ids_with_new_events_keep_latest_in_workflow_summary():
+    initial_evidence = make_evidence_item_recorded_event(
+        sequence=1,
+        evidence_id="evidence-1",
+        title="Initial evidence",
+    )
+    latest_evidence = make_evidence_item_recorded_event(
+        sequence=2,
+        evidence_id="evidence-1",
+        title="Latest evidence",
+        event_id="event-evidence-latest",
+    )
+    initial_link = make_evidence_claim_link_recorded_event(
+        sequence=3,
+        link_id="evidence-link-1",
+        evidence_id="evidence-1",
+        claim_id="claim-initial",
+    )
+    latest_link = make_evidence_claim_link_recorded_event(
+        sequence=4,
+        link_id="evidence-link-1",
+        evidence_id="evidence-1",
+        claim_id="claim-latest",
+        event_id="event-link-latest",
+    )
+
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[initial_evidence, latest_evidence, initial_link, latest_link],
+    )
+
+    assert state.evidence_summary["evidence_count"] == 1
+    assert state.evidence_summary["claim_count"] == 1
+    assert state.evidence_summary["claim_link_count"] == 1
+    assert [
+        _summary_item_id(item)
+        for item in state.evidence_summary["items"]
+    ] == ["evidence-1", "evidence-link-1"]
+    assert state.evidence_summary["items"][0]["title"] == "Latest evidence"
+    assert state.evidence_summary["items"][1]["claim_id"] == "claim-latest"
 
 
 def test_turn_complete_clears_event_pending_approvals_and_marks_completed():
