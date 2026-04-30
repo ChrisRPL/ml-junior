@@ -45,6 +45,10 @@ source of truth.
 - [SMOKE_GATES.md](SMOKE_GATES.md):
   read_when: defining local handoff checks, CI gates, release checks, Docker
   smoke checks, or network-dependent verification.
+- [subagent.md](subagent.md):
+  read_when: splitting work across overseer, worker, or verifier agents;
+  assigning strict write sets; coordinating parallel slices; or verifying another
+  agent's handoff.
 - [templates/ExecPlan.md](templates/ExecPlan.md):
   read_when: drafting a task plan that needs scope, checkpoints, validation,
   risks, and handoff notes.
