@@ -21,6 +21,9 @@ this repository now. "Target behavior" is direction only.
   backend capability.
 - Planned commands registered for help/completion print a capability-required
   message instead of executing.
+- `/doctor`, including `/doctor local-inference`, is planned only. It may appear
+  in help/completion metadata, but it must not perform checks until the backend
+  capability exists.
 - Headless mode is `ml-junior "prompt text"` or `ml-intern "prompt text"`.
   Approval-gated tools stop the run and print pending approvals unless
   `--yolo` or `--auto-approve` is passed.
@@ -61,7 +64,8 @@ available.
 
 Project commands:
 
-- `/new`, `/open`, `/status`, `/handoff`, `/export`, `/doctor`
+- `/new`, `/open`, `/status`, `/handoff`, `/export`, `/doctor`,
+  `/doctor local-inference`
 
 Flow and planning commands:
 
@@ -95,6 +99,54 @@ Target autonomy levels should be explicit:
 - `edit`: edit files; ask before commands.
 - `run`: run safe commands and experiments within budget.
 - `publish`: publish only after explicit final approval.
+
+## Local Inference Setup
+
+Target local model ids use explicit local prefixes:
+
+- `local/ollama/<model>` resolves to an OpenAI-compatible Ollama `/v1`
+  endpoint. Default base URL is the local Ollama daemon
+  (`http://localhost:11434/v1`) unless overridden by local inference config or
+  environment.
+- `local/llamacpp/<alias>` resolves to an OpenAI-compatible llama.cpp server
+  `/v1` endpoint. Default base URL is a local llama.cpp server
+  (`http://localhost:8080/v1`) unless overridden by local inference config or
+  environment.
+
+Setup contract:
+
+- Users start and manage Ollama or llama.cpp themselves. The CLI must not start,
+  install, update, or stop local inference daemons.
+- Configuration should accept localhost, container-host aliases, and private IP
+  addresses only. Public remote inference endpoints are provider endpoints, not
+  local inference.
+- The resolved endpoint uses a dummy local API key for OpenAI-compatible client
+  wiring. It must not require or reuse remote provider credentials.
+- Local setup docs and diagnostics must avoid printing full URLs with embedded
+  credentials, local user paths, request bodies, or model prompts.
+
+## `/doctor local-inference` Target Contract
+
+`/doctor local-inference` is a planned read-only diagnostic command. Target
+behavior:
+
+- Resolve configured Ollama and llama.cpp base URLs for requested local model
+  ids.
+- Validate URL scheme, host class, and `/v1` compatibility shape without
+  mutating config.
+- Report provider kind, model alias, base URL host class, intended `/v1/models`
+  probe URL, and remediation hints.
+- Redact secrets, auth headers, token query parameters, local user paths,
+  prompts, and response bodies in all terminal output, events, and logs.
+- Classify daemon responses supplied by the caller/test harness, including
+  success, connection refused, timeout, malformed JSON, incompatible schema, and
+  model-not-found.
+
+Non-goals for the command:
+
+- No daemon startup, package installation, model pull/download, or config write.
+- No remote/provider fallback when a local daemon is missing.
+- No sandbox, HF, MCP, telemetry, or internet calls.
 
 ## Contributor Rules
 

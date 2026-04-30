@@ -43,6 +43,10 @@ Current behavior:
 - Backend to MCP: only configured servers are used; tools are namespaced and
   registered before invocation.
 - Agent to local machine: CLI local mode exposes local `bash/read/write/edit`.
+- Agent to local inference daemon: planned local Ollama and llama.cpp endpoints
+  are local machine or private-network services selected by explicit
+  `local/...` model ids. They are trusted only as user-controlled local
+  processes, not as remote providers.
 - Agent to sandbox/Jobs: backend mode exposes HF Space sandbox tools and HF
   Jobs through approval policy.
 - Retrieved content to model context: docs, papers, GitHub files, datasets, Hub
@@ -134,12 +138,28 @@ Current behavior:
 - Policy requires approval for local shell and filesystem writes unless
   `yolo_mode` or compatible autonomy settings auto-approve.
 
+Local inference:
+
+- Local model ids resolve only to OpenAI-compatible Ollama or llama.cpp `/v1`
+  endpoints on localhost, container-host aliases, or private IP addresses.
+- Endpoint resolution and local inference probe helpers are validation and
+  classification helpers; they do not perform network I/O, start daemons, pull
+  models, or write config.
+- Planned `/doctor local-inference` output must treat daemon responses as
+  untrusted local process output and redact secrets, auth headers, token query
+  parameters, local user paths, prompts, and response bodies.
+- Local inference must not reuse remote provider API keys. Dummy local API keys
+  are acceptable only for OpenAI-compatible client wiring.
+
 Current limits:
 
 - Read-before-write/edit state is process-local memory.
 - Shell blocking is pattern/classification based and cannot prove arbitrary
   shell commands are safe.
-- Headless CLI runs with `yolo_mode=True`.
+- Headless CLI stops on approval-gated calls unless the user explicitly passes
+  `--yolo` or `--auto-approve`.
+- A local daemon can read prompts sent to it and may have its own plugins,
+  logging, model cache, or network behavior outside ML Junior's control.
 
 Target behavior:
 
@@ -148,6 +168,9 @@ Target behavior:
   classes even in automated modes.
 - Destructive commands should require an explicit out-of-band override, not only
   general tool approval.
+- `/doctor local-inference` should remain read-only and no-network in tests by
+  accepting fake-server or caller-supplied response/error payloads for
+  classification.
 
 ## Sandbox Execution
 
@@ -300,6 +323,8 @@ Use this checklist for changes touching security-sensitive paths:
 - Add or update redaction tests for new payload shapes.
 - Add regression tests when changing policy, event persistence, local/sandbox
   execution, MCP trust, Hub publishing, or spend behavior.
+- Add fake-server/no-network tests when changing local inference endpoint
+  resolution, probe classification, or `/doctor local-inference` contracts.
 - Run the offline gate from `docs/TESTING.md` when code changes accompany the
   policy update.
 
