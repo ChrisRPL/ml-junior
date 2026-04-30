@@ -18,15 +18,20 @@ Current behavior:
 - The agent loop is queue-driven. Inputs become `Submission` objects containing
   an `Operation`; agent output is accepted through the legacy `Event` shape and
   normalized into internal `AgentEvent` envelopes.
+- The backend has SQLite-backed durable stores for session metadata, operation
+  records, and redacted event envelopes under `session_logs/` by default. Store
+  paths can be overridden with `MLJ_SESSION_STORE_PATH`,
+  `MLJ_OPERATION_STORE_PATH`, and `MLJ_EVENT_STORE_PATH`.
 - The default config is `configs/main_agent_config.json`, with an Anthropic
   model, session saving enabled, CPU job confirmation enabled, automatic file
   upload enabled, and one Hugging Face MCP server configured.
 
 ML Junior target behavior:
 
-- Product naming, UX, and persistence should eventually be ML Junior-specific.
-- Any target claims about durable sessions, stronger policy, or broader
-  production hardening are not current guarantees unless this doc says
+- Product naming, UX, executable resume, stronger policy, and broader
+  production hardening should eventually be ML Junior-specific.
+- Durable metadata stores are current behavior. Restart-safe execution and
+  full live-session recovery are target behavior unless this doc says
   "Current behavior".
 
 ## Queues And Agent Loop
@@ -47,7 +52,10 @@ Current behavior:
 Current limitations:
 
 - Queues are in process only. A backend restart loses active work.
-- There is no durable replay of submissions or events.
+- Submitted operations are durably recorded, but a restart does not rebuild
+  in-flight queues or resume a partially processed operation.
+- Persisted event envelopes support API replay by sequence cursor; they are
+  replay of emitted events, not execution replay.
 - One session task processes queued operations serially, even though tools
   inside a turn may run concurrently.
 
@@ -71,8 +79,8 @@ Current behavior:
 
 Current limitations:
 
-- Context lives in memory. Session trajectory saving is separate from restoring
-  live backend state.
+- Context lives in memory. Durable session/event/operation records and session
+  trajectory saving do not reconstruct live `ContextManager` state.
 - Compaction and restore-summary require a working LLM/provider path.
 - Token accounting depends on provider usage data until post-compact recount.
 - Dangling tool calls are patched with stub tool results so later LLM calls stay
@@ -172,7 +180,9 @@ Current behavior:
 
 Current limitations:
 
-- Pending approvals are memory-only.
+- Pending approval execution state is memory-only. Durable session records keep
+  redacted pending approval refs for visibility and workflow projection, but
+  they cannot resume an approval after restart.
 - The approval center is still UI-first around existing approval flows; richer
   rendering of policy metadata belongs to `MLJ-UX-004`.
 
@@ -186,12 +196,18 @@ Current behavior:
 - `/api/chat/{session_id}` submits either text or approvals, then streams SSE
   until `turn_complete`, `approval_required`, `error`, `interrupted`, or
   `shutdown`.
-- `/api/events/{session_id}` subscribes to events for an existing session.
-- SSE payloads are JSON under `data:`. Keepalive comments are sent every 15s.
+- `/api/events/{session_id}` subscribes to events for an existing active
+  session. When `after_sequence`, `after`, or `Last-Event-ID` is supplied, it
+  replays persisted events after that sequence before live events.
+- SSE payloads are JSON under `data:`. Events with a sequence also include
+  `id: <sequence>`. Keepalive comments are sent every 15s.
 - Internal agent events are Pydantic `AgentEvent` envelopes with `id`,
   `session_id`, per-session `sequence`, `timestamp`, `event_type`,
   `schema_version`, `redaction_status`, and typed payload validation for the
   current event list.
+- `EventBroadcaster` reads from the session event queue, persists redacted
+  `AgentEvent` envelopes through `SQLiteEventStore`, then fans out the stored
+  event to current subscribers.
 - Event payloads are passed through targeted redaction before queueing and
   trajectory logging. Redaction covers obvious token/key patterns, bearer auth
   headers, private token URL query params, local user paths, and private dataset
@@ -204,16 +220,21 @@ Current behavior:
   for browser/cache recovery without mutating live `ContextManager` messages.
 - The public SSE payload remains the compatibility shape
   `{ "event_type": "...", "data": { ... } }`; envelope metadata is not emitted
-  to the frontend yet. This is intentional until the replay/cursor event-store
-  work defines the public event envelope contract.
+  inside `data:`. Replay currently exposes the sequence through the SSE `id:`
+  field rather than a public envelope contract.
 - The backend subscribes to the broadcaster before submitting work so it does
   not miss same-turn events.
 
 Current limitations:
 
-- `EventBroadcaster` discards events when no subscribers are listening.
-- SSE has no replay buffer; reconnects only receive future events.
-- Event envelopes are not persisted yet.
+- Live fan-out only reaches current subscribers; clients recover missed events
+  by reconnecting to `/api/events/{session_id}` with a stored sequence cursor.
+- Replay is session-scoped and sequence-based. It does not rebuild backend
+  queues, pending LLM calls, sandbox handles, or live `ContextManager` state.
+- `/api/chat/{session_id}` is a live same-turn stream and does not accept replay
+  cursors; cursor replay is on `/api/events/{session_id}`.
+- If the process is down, no new events are produced. Already stored events
+  remain queryable after restart through the event store.
 - `redaction_status` and other envelope metadata are internal-only today; public
   SSE remains legacy-shaped for compatibility.
 - Redaction is targeted and heuristic; new provider token formats or unusual
@@ -221,9 +242,52 @@ Current limitations:
 - `/api/events/{session_id}` currently does not enforce `is_processing` despite
   the docstring saying it is for in-progress sessions.
 
+## Workflow Projection And Flow Templates
+
+Current behavior:
+
+- `GET /api/session/{session_id}/workflow` returns a read-only `WorkflowState`
+  projection for any accessible durable session.
+- The projection is recomputed from persisted `AgentEvent` envelopes, the
+  durable `SessionRecord`, and durable `OperationRecord` rows. It exposes
+  status, phase, plan items, blockers, pending approvals, active jobs,
+  operation refs, human requests, evidence summary, live tracking placeholders,
+  last event sequence, and resume cursor metadata.
+- `WorkflowResumeState.can_resume` is `false` with reason
+  `executable_resume_not_implemented`; the cursor is informational for replay
+  and UI hydration.
+- Phase events, plan updates, approval events, tool state/output events, active
+  job refs, artifact/metric/log refs, evidence items, evidence claim links,
+  human requests, and verifier verdicts project into workflow state when those
+  events exist.
+- Built-in flow templates live under `backend/builtin_flow_templates/`.
+  `GET /api/flows` returns the read-only catalog. `GET
+  /api/flows/{template_id}/preview` returns inputs, required inputs, budgets,
+  phases, approvals, expected outputs/artifacts, verifier checks, verifier
+  catalog coverage, risky operations, and source metadata.
+- CLI `/flows` and `/flow preview <id>` use the same backend flow-template
+  helpers and are read-only.
+
+Current limitations:
+
+- Workflow state is a projection, not an executable workflow engine. Flow
+  start, pause, resume, and fork are not implemented.
+- Projection quality depends on which events have been emitted. Compatibility
+  warnings can include placeholder producer names such as workflow events,
+  budget ledger, evidence ledger, or live tracking.
+- Stored operation refs are useful for inspection and projection, but they do
+  not make queued work restartable.
+
+ML Junior target behavior:
+
+- Workflow projection should become the stable handoff and recovery surface for
+  resumed, forked, and audited ML work.
+- Flow start/pause/resume/fork should become real operations only after the
+  backend has executable workflow state and policy coverage.
+
 ## Current Event List
 
-Current agent/backend events observed in code:
+Current agent/backend event types validated or projected in code:
 
 - `ready`: session loop initialized.
 - `processing`: a user input turn started.
@@ -236,6 +300,19 @@ Current agent/backend events observed in code:
 - `tool_state_change`: approval/runtime state change for an existing tool call.
 - `approval_required`: one or more tool calls require user approval.
 - `plan_update`: plan tool emitted a full todo list.
+- `phase.not_started`, `phase.pending`, `phase.started`, `phase.blocked`,
+  `phase.completed`, `phase.failed`, and `phase.verified`: phase state
+  projection events.
+- `checkpoint.created`, `fork_point.created`, and `handoff.summary_created`:
+  project continuity metadata.
+- `dataset_snapshot.recorded`, `code_snapshot.recorded`,
+  `experiment.run_recorded`, `metric.recorded`, `log_ref.recorded`,
+  `active_job.recorded`, and `artifact_ref.recorded`: experiment and artifact
+  ledger metadata.
+- `evidence_item.recorded`, `evidence_claim_link.recorded`, and
+  `verifier.completed`: evidence/verifier metadata for workflow projection.
+- `human_request.requested` and `human_request.resolved`: human-in-the-loop
+  workflow metadata.
 - `compacted`: context compaction changed token usage.
 - `undo_complete`: undo operation completed.
 - `interrupted`: running turn/tool was interrupted.
@@ -259,11 +336,17 @@ Backend routes:
 - `GET /api/health`: process health check.
 - `GET /api/health/llm`: network/API-key-dependent LLM health probe.
 - `GET /api/config/model`: current and available models.
+- `GET /api/flows`: read-only built-in flow catalog.
+- `GET /api/flows/{template_id}/preview`: read-only flow template preview.
 - `POST /api/title`: short title generation through an LLM call.
 - `POST /api/session`: create session.
 - `POST /api/session/restore-summary`: create session from browser-cached
   message summary.
 - `GET /api/session/{session_id}`: session metadata.
+- `GET /api/session/{session_id}/workflow`: read-only workflow projection.
+- `GET /api/session/{session_id}/operations`: redacted durable operation list.
+- `GET /api/session/{session_id}/operations/{operation_id}`: one redacted
+  durable operation scoped to the session.
 - `POST /api/session/{session_id}/model`: switch session model.
 - `GET /api/user/quota`: Claude quota state.
 - `GET /api/sessions`: list accessible sessions.
@@ -272,7 +355,8 @@ Backend routes:
 - `POST /api/approve`: enqueue approval decisions.
 - `POST /api/chat/{session_id}`: submit text or approvals and stream same-turn
   SSE.
-- `GET /api/events/{session_id}`: subscribe to future events for a session.
+- `GET /api/events/{session_id}`: subscribe to live events, optionally replaying
+  persisted events after a sequence cursor.
 - `POST /api/interrupt/{session_id}`: signal cancellation.
 - `GET /api/session/{session_id}/messages`: in-memory message history.
 - `POST /api/undo/{session_id}`: enqueue undo.
@@ -290,6 +374,24 @@ Current CLI slash commands:
 - `/yolo`
 - `/status`
 - `/quit` and `/exit`
+- `/flows`
+- `/flow preview <id>`
+
+Current slash command registry/completion additions:
+
+- The parser and prompt completer know implemented and planned command
+  metadata: group, risk level, mutating/read-only status, aliases, and required
+  backend capability.
+- Implemented command aliases include `/exit`, `quit`, and `exit` for `/quit`.
+- Planned project commands are registered for help/completion only: `/new`,
+  `/open`, `/handoff`, `/export`, and `/doctor`.
+- Planned flow/workflow commands are registered for help/completion only:
+  `/flow start`, `/flow pause`, `/flow resume`, `/flow fork`, `/phase`, and
+  `/plan`.
+- Planned experiment/tool/evidence/code commands are registered for
+  help/completion only, including `/runs`, `/run show`, `/tools`, `/jobs`,
+  `/approve`, `/deny`, `/ledger verify`, `/diff`, `/test`, `/commit`, and
+  `/pr`. They print a capability-required message instead of executing.
 
 Headless CLI:
 
@@ -299,21 +401,44 @@ Headless CLI:
 
 Current behavior:
 
-- `SessionManager` is a process-local singleton holding `AgentSession` objects
-  in a dictionary.
+- `SessionManager` holds live `AgentSession` objects in a process-local
+  dictionary and lazily initializes SQLite session, operation, and event stores.
 - Session creation deep-copies config per session, creates fresh queues, creates
   `ToolRouter` and `Session` in a worker thread, starts `_run_session()`, and
   returns a UUID.
+- Session creation also writes a durable session record with owner, model,
+  status, and empty pending approval/active job refs.
+- Submitted user input, approval, undo, compact, and shutdown operations are
+  written to the durable operation store before being enqueued. `_run_session()`
+  transitions them through running and terminal states with redacted
+  result/error payloads.
+- Interrupt and truncate operations are recorded too, but they act directly on
+  the live session instead of waiting behind queued work.
+- `EventBroadcaster` persists redacted event envelopes to the event store before
+  live fan-out.
+- Session refs for pending approvals and active jobs are snapshotted into the
+  durable session record as redacted metadata. Ending, deleting, or shutting
+  down a session marks the durable session record closed.
+- `replay_events()`, `list_operations()`, `get_operation()`, and
+  `get_workflow_state()` read from the durable stores.
 - Capacity limits are static: 200 global active sessions and 10 per non-dev
   user.
 - Session access is owner-based, with `dev` bypass behavior.
 - Deleting or ending a session attempts to delete an owned sandbox Space.
 - Session info exposes active/processing state, message count, model, owner, and
-  pending approvals.
+  pending approvals. For durable-only sessions, it returns stored owner/model
+  metadata with inactive/zero-message live state.
+- Listing sessions merges durable session rows and live sessions.
 
 Current limitations:
 
-- Sessions, ownership state, quota flags, and pending approvals are not durable.
+- Live `AgentSession` objects, queues, `ContextManager` messages, sandbox
+  handles, HF tokens, quota flags, and approval execution state are
+  process-local.
+- Durable session records persist metadata and redacted refs, but backend
+  restart does not recreate active session tasks.
+- Capacity checks count live in-process sessions, not active durable rows from a
+  prior process.
 - Capacity is count-based only; it does not account for live CPU, memory, or
   provider rate limits.
 
@@ -342,8 +467,14 @@ Current limitations:
 
 ## Current Limitation Summary
 
-- No durable backend session store.
-- No SSE replay.
+- Durable stores cover session metadata, operation records, and event envelopes,
+  but live queues, context, sandbox handles, tokens, quota flags, and executable
+  resume remain process-local.
+- SSE replay exists for `/api/events/{session_id}` with sequence cursors, but
+  `/api/chat/{session_id}` remains a live same-turn stream and public payloads
+  stay legacy-shaped.
+- Workflow state is a read-only projection. Flow catalog/preview are shipped;
+  flow start/pause/resume/fork are planned only.
 - Provider, HF, MCP, Docker build, and sandbox paths can be network-dependent.
 - Some docs and package names still say ML Intern rather than ML Junior.
 - `/api/health` is a process health check, not an end-to-end LLM/tool smoke.
