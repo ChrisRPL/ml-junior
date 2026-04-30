@@ -198,15 +198,17 @@ Current behavior:
 - Persistence: HF Jobs and Hub repos are external persistent side effects.
   Running job ids are tracked in session memory for interrupt cleanup. An inert
   append-only SQLite store can persist explicit active-job and artifact refs,
-  but runtime tools do not write to it yet.
+  including schema-only artifact locator/lifecycle/export-policy metadata, but
+  runtime tools do not write to it yet.
 - Failure modes: job storage is ephemeral unless scripts push artifacts to the
   Hub; missing HF token/namespace, invalid hardware, paid compute, job failure,
   repo permission errors, or network errors surface as tool failures; approved
   mutations can still overwrite or delete remote content.
 - Tests: `tests/unit/test_policy_engine.py`,
   `tests/unit/test_tool_router_approval.py`,
-  `tests/unit/test_job_artifact_refs.py`, and
-  workflow/progress tests that project job refs.
+  `tests/unit/test_job_artifact_refs.py`,
+  `tests/unit/test_experiment_ledger.py`, and workflow/progress tests that
+  project job refs.
 
 Target behavior:
 
@@ -248,6 +250,31 @@ Target behavior:
 - Provenance export should start with a local-first manifest plus NDJSON record
   files before optional PROV-JSONLD, OpenLineage, Parquet/DuckDB, or MLMD
   adapters.
+
+## Local Inference Diagnostics
+
+Current behavior:
+
+- Responsibilities: describe configured local Ollama/llama.cpp endpoints,
+  build intended `/v1/models` probe descriptors, classify caller-supplied probe
+  results, and build planned doctor report objects.
+- Inputs: local runtime config/env metadata, expected local model id, and
+  caller-supplied classifications or errors.
+- Outputs: pure runtime descriptors, probe descriptors/classifications, and
+  doctor reports with runtime id, provider kind, model alias, host class,
+  intended models URL, status, redacted messages, and remediation hints.
+- Persistence: none. The helpers do not mutate config or record budget usage.
+- Failure modes: invalid config returns config-error descriptors; missing or
+  malformed caller-supplied payloads become report statuses and hints.
+- Tests: `tests/unit/test_local_inference.py`,
+  `tests/unit/test_local_inference_doctor.py`, and
+  `tests/unit/test_llm_params.py`.
+
+Target behavior:
+
+- `/doctor local-inference` can consume these pure reports later, but the
+  command, daemon probes, provider calls, model pulls, and UI/routes are not
+  implemented.
 
 ## Backend API, SSE, And Events
 

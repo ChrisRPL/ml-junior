@@ -145,6 +145,9 @@ Local inference:
 - Endpoint resolution and local inference probe helpers are validation and
   classification helpers; they do not perform network I/O, start daemons, pull
   models, or write config.
+- Local inference doctor reports are also pure. They combine already supplied
+  descriptors/classifications into redacted status and remediation text, but do
+  not implement a CLI command or perform daemon probes.
 - Planned `/doctor local-inference` output must treat daemon responses as
   untrusted local process output and redact secrets, auth headers, token query
   parameters, local user paths, prompts, and response bodies.

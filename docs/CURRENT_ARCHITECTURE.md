@@ -266,8 +266,11 @@ Current behavior:
   no runtime producer writes to it and it does not reserve, spend, or enforce
   quota.
 - Active job and artifact records also have an inert append-only SQLite store
-  for caller-supplied refs. Nothing wires that store to job launch, polling,
-  artifact discovery, routes, or workflow producers yet.
+  for caller-supplied refs. Artifact refs can carry schema-only locator
+  metadata (`ref_uri`, typed locator, lifecycle, MIME type, size, producer, and
+  export policy), including sandbox locators. Nothing wires that store to job
+  launch, polling, artifact discovery, routes, export behavior, or workflow
+  producers yet.
 - Dataset lineage currently exists as closed, caller-supplied manifest/diff
   models, an inert transform/filter/augment/merge lineage DAG schema, and pure
   sha256 blob digest/path conventions. Experiment run records can reference
@@ -494,8 +497,11 @@ Current behavior:
 - Local inference probe helpers are also pure metadata/classification helpers.
   They build intended `/v1/models` probe descriptors and classify
   caller-supplied payloads or errors; they do not perform network I/O or start
-  local daemons. Endpoint resolution and probe logic live in separate helper
-  modules behind the compatibility `agent.core.local_inference` facade.
+  local daemons. A pure local inference doctor report model combines supplied
+  descriptors and classifications into status, host class, redacted messages,
+  and remediation hints without implementing the CLI command or probing
+  daemons. Endpoint resolution, probe logic, and doctor-report helpers live
+  behind the compatibility `agent.core.local_inference` facade.
 - Backend-created sessions use sandbox mode by default. Sandbox mode exposes
   `sandbox_create`, `bash`, `read`, `write`, and `edit` backed by a Hugging Face
   Space sandbox.
