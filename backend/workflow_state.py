@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from agent.core.events import AgentEvent
+from backend.assumption_ledger import project_assumptions
 from backend.budget_ledger import (
     BudgetLimitRecord,
     BudgetUsageRecord,
@@ -133,6 +134,7 @@ def build_workflow_state(
     recorded_evidence_items = _evidence_items_from_events(session_id, unique_events)
     recorded_claim_links = _evidence_claim_links_from_events(session_id, unique_events)
     recorded_decision_cards = _decision_cards_from_events(session_id, unique_events)
+    recorded_assumptions = _assumptions_from_events(session_id, unique_events)
     recorded_proof_bundles = _proof_bundles_from_events(session_id, unique_events)
     recorded_budget_limits = _budget_limits_from_events(session_id, unique_events)
     recorded_budget_usage = _budget_usage_from_events(session_id, unique_events)
@@ -234,6 +236,7 @@ def build_workflow_state(
             evidence_items=recorded_evidence_items,
             claim_links=recorded_claim_links,
             decision_cards=recorded_decision_cards,
+            assumptions=recorded_assumptions,
             proof_bundles=recorded_proof_bundles,
             verifier_verdicts=recorded_verifier_verdicts,
         ),
@@ -637,6 +640,16 @@ def _decision_cards_from_events(
     ]
 
 
+def _assumptions_from_events(
+    session_id: str,
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    return [
+        record.model_dump(mode="json", exclude_none=True)
+        for record in project_assumptions(session_id, events)
+    ]
+
+
 def _proof_bundles_from_events(
     session_id: str,
     events: list[AgentEvent],
@@ -829,6 +842,7 @@ def _evidence_summary(
     evidence_items: list[dict[str, Any]],
     claim_links: list[dict[str, Any]],
     decision_cards: list[dict[str, Any]],
+    assumptions: list[dict[str, Any]],
     proof_bundles: list[dict[str, Any]],
     verifier_verdicts: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -838,6 +852,7 @@ def _evidence_summary(
         and not log_refs
         and not evidence_items
         and not decision_cards
+        and not assumptions
         and not proof_bundles
     ):
         if not claim_links and not verifier_verdicts:
@@ -851,6 +866,7 @@ def _evidence_summary(
             *evidence_items,
             *claim_links,
             *decision_cards,
+            *assumptions,
             *proof_bundles,
             *verifier_verdicts,
         ],
@@ -869,6 +885,7 @@ def _evidence_summary(
         "metric_count": len(metric_refs),
         "log_count": len(log_refs),
         "decision_card_count": len(decision_cards),
+        "assumption_count": len(assumptions),
         "proof_bundle_count": len(proof_bundles),
         "items": items,
     }

@@ -387,7 +387,18 @@ class PolicyEngine:
     def _with_metadata(
         decision: PolicyDecision, metadata: ToolMetadata
     ) -> PolicyDecision:
-        fill_from_metadata = decision.risk == RiskLevel.UNKNOWN
+        has_specific_metadata = (
+            (
+                bool(decision.side_effects)
+                and decision.side_effects != ["Unknown tool side effects."]
+            )
+            or decision.rollback not in {"None needed.", "Unknown."}
+            or decision.budget_impact not in {"None.", "Unknown."}
+            or bool(decision.credential_usage)
+        )
+        fill_from_metadata = (
+            decision.risk == RiskLevel.UNKNOWN and not has_specific_metadata
+        )
         risk = _coerce_risk(metadata.risk)
         if risk is not None and fill_from_metadata:
             decision.risk = risk

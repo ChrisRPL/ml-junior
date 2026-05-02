@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from agent.config import Config
+from agent.core.events import AgentEvent
 from agent.core.policy import PolicyEngine, RiskLevel, ToolMetadata
 
 
@@ -126,6 +127,85 @@ def test_hf_job_cpu_obeys_confirm_cpu_jobs() -> None:
     assert auto_cpu.risk is RiskLevel.MEDIUM
     assert "about $0.03 for 1h" in auto_cpu.budget_impact
     assert "confirm_cpu_jobs=false" in auto_cpu.reason
+
+
+def test_hf_job_approval_metadata_preserves_enriched_compute_risk() -> None:
+    scheduled_unknown = PolicyEngine.evaluate(
+        "hf_jobs",
+        {
+            "operation": "scheduled run",
+            "hardware_flavor": "future-h200x8",
+            "timeout": "bogus",
+        },
+        config_for_policy(confirm_cpu_jobs=False),
+    )
+
+    metadata = scheduled_unknown.approval_metadata()
+
+    assert scheduled_unknown.requires_approval is True
+    assert metadata["risk"] == "unknown"
+    assert metadata["side_effects"] == [
+        "Starts or schedules a Hugging Face compute job."
+    ]
+    assert metadata["rollback"] == "Cancel the job or delete the scheduled job."
+    assert metadata["budget_impact"] == (
+        "Unknown HF compute spend; hardware is missing or not recognized in "
+        "the local flavor list."
+    )
+    assert metadata["credential_usage"] == ["hf_token"]
+    assert "scheduled recurrence requires approval" in metadata["reason"]
+    assert "uncertainty=unparsed_timeout, unknown_hardware" in metadata["reason"]
+    assert "recurrence_multiplier_unknown" in metadata["reason"]
+
+
+def test_confirm_cpu_jobs_false_only_skips_explicit_cpu_approval_gate() -> None:
+    tool_args = {
+        "operation": "run",
+        "hardware_flavor": "cpu-basic",
+        "timeout": "45m",
+    }
+
+    gated = PolicyEngine.evaluate(
+        "hf_jobs",
+        tool_args,
+        config_for_policy(confirm_cpu_jobs=True),
+    )
+    ungated = PolicyEngine.evaluate(
+        "hf_jobs",
+        tool_args,
+        config_for_policy(confirm_cpu_jobs=False),
+    )
+
+    gated_metadata = gated.approval_metadata()
+    ungated_metadata = ungated.approval_metadata()
+
+    assert gated.requires_approval is True
+    assert ungated.requires_approval is False
+    assert {
+        key: gated_metadata[key]
+        for key in (
+            "risk",
+            "side_effects",
+            "rollback",
+            "budget_impact",
+            "credential_usage",
+        )
+    } == {
+        key: ungated_metadata[key]
+        for key in (
+            "risk",
+            "side_effects",
+            "rollback",
+            "budget_impact",
+            "credential_usage",
+        )
+    }
+    assert ungated_metadata["risk"] == "medium"
+    assert "Estimated cpu-basic cpu spend: about $0.01 for 45m." == (
+        ungated_metadata["budget_impact"]
+    )
+    assert "confirm_cpu_jobs=false" in ungated_metadata["reason"]
+    assert "Hugging Face job launch risk: cpu" in ungated_metadata["reason"]
 
 
 @pytest.mark.parametrize("hardware_key", ["hardware_flavor", "flavor", "hardware"])
@@ -265,3 +345,124 @@ def test_yolo_and_autonomy_skip_approvals_but_keep_risk_metadata(config: Any) ->
     assert decision.rollback
     assert decision.credential_usage
     assert "Auto-approved" in decision.reason
+
+
+def _hf_jobs_approval_event(tool_args: dict[str, Any], sequence: int = 1) -> AgentEvent:
+    decision = PolicyEngine.evaluate(
+        "hf_jobs",
+        tool_args,
+        config_for_policy(confirm_cpu_jobs=True),
+    )
+    metadata = decision.approval_metadata()
+    return AgentEvent(
+        session_id="session-a",
+        sequence=sequence,
+        event_type="approval_required",
+        data={
+            "tools": [
+                {
+                    "tool": "hf_jobs",
+                    "arguments": tool_args,
+                    "tool_call_id": "tc-1",
+                    **metadata,
+                }
+            ],
+            "count": 1,
+        },
+    )
+
+
+def test_hf_compute_risk_preserved_in_approval_required_event() -> None:
+    event = _hf_jobs_approval_event(
+        {"operation": "run", "hardware_flavor": "a100x8", "timeout": "2h"},
+        sequence=5,
+    )
+
+    assert event.event_type == "approval_required"
+    assert event.sequence == 5
+    tools = event.data["tools"]
+    assert len(tools) == 1
+    tool_data = tools[0]
+    assert tool_data["risk"] == "critical"
+    assert tool_data["budget_impact"] == (
+        "Estimated a100x8 multi_gpu spend: about $40.00 for 2h."
+    )
+    assert "multi_gpu" in tool_data["reason"]
+    assert "spend=high" in tool_data["reason"]
+    assert tool_data["side_effects"] == [
+        "Starts or schedules a Hugging Face compute job."
+    ]
+    assert tool_data["rollback"] == "Cancel the job or delete the scheduled job."
+    assert tool_data["credential_usage"] == ["hf_token"]
+
+
+def test_hf_compute_risk_preserved_in_scheduled_cpu_approval_event() -> None:
+    event = _hf_jobs_approval_event(
+        {"operation": "scheduled run", "hardware_flavor": "cpu-upgrade"},
+        sequence=3,
+    )
+
+    tools = event.data["tools"]
+    assert tools[0]["risk"] == "high"
+    assert "cpu-upgrade cpu spend" in tools[0]["budget_impact"]
+    assert "recurrence_multiplier_unknown" in tools[0]["reason"]
+    assert "Recurring schedule" in tools[0]["budget_impact"]
+
+
+def test_hf_compute_risk_redaction_preserves_approval_structure() -> None:
+    secret = "hf_supersecret_token_xyz"
+    event = _hf_jobs_approval_event(
+        {
+            "operation": "run",
+            "hardware_flavor": "a100x8",
+            "timeout": "2h",
+            "env": {"HF_TOKEN": secret},
+        },
+        sequence=1,
+    )
+
+    redacted = event.redacted_copy()
+    tools = redacted.data["tools"]
+    assert len(tools) == 1
+    assert tools[0]["risk"] == "critical"
+    assert "about $40.00 for 2h" in tools[0]["budget_impact"]
+    assert tools[0]["side_effects"] == [
+        "Starts or schedules a Hugging Face compute job."
+    ]
+    assert tools[0]["credential_usage"] == ["hf_token"]
+    assert secret not in repr(redacted.data)
+
+
+def test_hf_compute_risk_approval_event_is_frontend_compatible() -> None:
+    event = _hf_jobs_approval_event(
+        {"operation": "run", "hardware_flavor": "t4-small", "timeout": "45m"},
+        sequence=2,
+    )
+
+    sse_payload = event.to_legacy_sse()
+    assert sse_payload["event_type"] == "approval_required"
+    tools = sse_payload["data"]["tools"]
+    assert tools[0]["risk"] == "high"
+    assert "t4-small" in tools[0]["budget_impact"]
+    assert "about $0.30 for 45m" in tools[0]["budget_impact"]
+    assert "tool_call_id" in tools[0]
+    assert "arguments" in tools[0]
+
+
+def test_hf_compute_risk_pending_approval_session_info_shape() -> None:
+    decision = PolicyEngine.evaluate(
+        "hf_jobs",
+        {"operation": "run", "hardware_flavor": "l4x1", "timeout": "1h"},
+        config_for_policy(confirm_cpu_jobs=True),
+    )
+    metadata = decision.approval_metadata()
+
+    pending_approval = {
+        "tool_calls": [{"id": "tc-1"}],
+        "policy": {"tc-1": metadata},
+    }
+
+    assert pending_approval["policy"]["tc-1"]["risk"] == "high"
+    assert "l4x1" in pending_approval["policy"]["tc-1"]["budget_impact"]
+    assert "about $0.80 for 1h" in pending_approval["policy"]["tc-1"]["budget_impact"]
+    assert pending_approval["policy"]["tc-1"]["credential_usage"] == ["hf_token"]

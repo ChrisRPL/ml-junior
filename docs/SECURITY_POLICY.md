@@ -146,13 +146,70 @@ Local inference:
   classification helpers; they do not perform network I/O, start daemons, pull
   models, or write config.
 - Local inference doctor reports are also pure. They combine already supplied
-  descriptors/classifications into redacted status and remediation text, but do
-  not implement a CLI command or perform daemon probes.
-- Planned `/doctor local-inference` output must treat daemon responses as
-  untrusted local process output and redact secrets, auth headers, token query
-  parameters, local user paths, prompts, and response bodies.
+  descriptors/classifications into redacted status and remediation text.
+- `/doctor local-inference` is a read-only CLI renderer for local metadata and
+  config-error reports. It does not probe daemons, perform provider calls, pull
+  models, or write config.
+- Any future `/doctor local-inference` daemon-response classification must
+  treat daemon responses as untrusted local process output and redact secrets,
+  auth headers, token query parameters, local user paths, prompts, and response
+  bodies.
 - Local inference must not reuse remote provider API keys. Dummy local API keys
   are acceptable only for OpenAI-compatible client wiring.
+- CLI backend index mode is opt-in through `MLJ_BACKEND_BASE_URL` and
+  `MLJ_BACKEND_SESSION_ID`. It may attach only `MLJ_BACKEND_BEARER_TOKEN` as a
+  bearer token, reads only run/artifact index JSON, applies terminal redaction,
+  and must not submit messages, replay sessions, inspect artifact blobs, call
+  providers/Trackio, or emit events.
+- `/evidence` is a read-only current-session renderer over existing workflow
+  evidence summary event rows. It applies terminal redaction and must not read
+  durable stores, create/link evidence, verify claims, sign/export proof
+  bundles, inspect artifact blobs or log bodies, ingest metrics, contact
+  providers/Trackio, or emit events.
+- `/decisions` is a read-only current-session renderer over existing decision
+  cards in the workflow evidence summary. It applies terminal redaction and
+  must not read durable stores, create/edit decisions, infer assumptions,
+  sign/export proof bundles, inspect artifact blobs or log bodies, contact
+  providers/Trackio, or emit events.
+- `assumption.recorded` is an inert explicit-event contract. It must not be
+  produced from implicit chat summarization, must preserve privacy/redaction
+  metadata, and currently has no mutating CLI command, runtime producer, export
+  path, or public sharing path. `/assumptions` may render only current-session
+  projected assumption rows and must not create, update, infer, export, or share
+  assumptions.
+- `/ledger` is a read-only current-session renderer over redacted event
+  envelope metadata only. It may show sequence, event id/type, timestamp,
+  schema version, redaction status, safe top-level refs, and top-level payload
+  keys. It must not read durable stores, display full payload/body/blob/log
+  values, verify ledgers, sign/export/share, contact providers, or emit events.
+- Policy approval audit contracts exist for trust-sensitive planned commands:
+  `/share-traces public|private`, `/ledger verify [bundle]`, and `/proof bundle
+  [run]`. The contracts are inert and define approval text, risk, side effects,
+  rollback, credential usage, privacy defaults, audit event names, required
+  audit fields, redaction requirements, and preconditions. Closed
+  `policy.audit_intent_recorded` and `policy.audit_result_recorded` payload
+  schemas and inert projection helpers exist so future audit writers fail
+  closed on unknown fields, session mismatch, duplicate ids, and missing
+  intent/result correlation. Pure builders now create validated, redacted
+  intent/result payload drafts from contracts plus explicit caller metadata and
+  fail closed on missing stage-specific audit fields, unknown commands or
+  arguments, unknown payload fields, protected-field overrides, missing
+  correlation ids, public trace sharing without acknowledgement/redaction, and
+  mismatched result correlation. They must be used before implementing those
+  commands, but they do not by themselves permit execution, remote visibility
+  changes, verification, signing, export, or audit emission.
+- Pure `MLJ-TPS-014d` `AgentEvent` envelope builders wrap already-built policy
+  audit drafts into validated, redacted envelopes and fail closed on unknown
+  event types. They do not append events, write durable audit rows, dispatch
+  commands, call providers/HF/network, add backend routes, add UI/TUI surfaces,
+  or enable audit emission.
+- `/handoff preview` is a read-only current-session renderer over redacted
+  logged events, workflow projection, and the pure handoff summary generator. It
+  must not emit `handoff.summary_created`, write/export files, read durable
+  stores, call backend routes, create checkpoints/forks, invoke LLM
+  summarization, inspect artifact blobs or log bodies, start/resume/fork
+  workflows, contact providers, or mutate state. `/handoff [path]` remains
+  planned and mutating until its durable write/export policy is explicit.
 
 Current limits:
 

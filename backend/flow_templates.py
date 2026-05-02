@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Callable, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -648,6 +650,83 @@ def _format_validation_error(exc: ValidationError) -> str:
     return "Invalid flow template: " + "; ".join(errors)
 
 
+class FlowStartError(FlowTemplateError):
+    """Raised when a flow cannot be started from a template."""
+
+
+def start_flow(
+    template: FlowTemplate,
+    session_id: str,
+    *,
+    append_callable: Callable[[Any], Any],
+    inputs: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Initialize a workflow instance from a flow template.
+
+    Creates the initial phase state, persists a phase.started event through
+    the injected append callable, and returns a durable flow handle.
+
+    Args:
+        template: Parsed flow template.
+        session_id: Target session id.
+        append_callable: Event-store append callable (e.g., event_store.append).
+        inputs: Optional user-supplied input values.
+
+    Returns:
+        Flow handle dictionary with flow_id, session_id, template_id,
+        template_version, phase_id, phase_name, status, and started_at.
+    """
+    if not template.phases:
+        raise FlowStartError("template has no phases")
+
+    first_phase = min(template.phases, key=lambda phase: phase.order)
+    flow_id = f"flow-{uuid.uuid4().hex}"
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    event_data = {
+        "session_id": session_id,
+        "project_id": session_id,
+        "template_id": template.id,
+        "template_version": template.version,
+        "phase_id": first_phase.id,
+        "phase_name": first_phase.name,
+        "phase_order": first_phase.order,
+        "from_status": "not_started",
+        "to_status": "active",
+        "allowed": True,
+        "flow_id": flow_id,
+        "inputs": dict(inputs) if inputs else {},
+        "started_at": started_at,
+    }
+
+    try:
+        from agent.core.events import AgentEvent
+    except Exception as exc:
+        raise FlowStartError("AgentEvent not available") from exc
+
+    event = AgentEvent(
+        session_id=session_id,
+        sequence=1,
+        event_type="phase.started",
+        data=event_data,
+    )
+    stored_event = append_callable(event)
+
+    if not hasattr(stored_event, "data") or not isinstance(stored_event.data, dict):
+        raise FlowStartError("append_callable did not return a valid event")
+
+    return {
+        "flow_id": flow_id,
+        "session_id": session_id,
+        "template_id": template.id,
+        "template_version": template.version,
+        "phase_id": first_phase.id,
+        "phase_name": first_phase.name,
+        "status": "active",
+        "started_at": started_at,
+    }
+
+
 __all__ = [
     "ApprovalPoint",
     "ArtifactSpec",
@@ -655,6 +734,7 @@ __all__ = [
     "FlowTemplate",
     "FlowTemplateError",
     "FlowTemplateNotFoundError",
+    "FlowStartError",
     "RequiredOutput",
     "SUPPORTED_SCHEMA_VERSION",
     "SUPPORTED_FLOW_TEMPLATE_SOURCES",
@@ -670,4 +750,5 @@ __all__ = [
     "list_flow_template_sources",
     "list_flow_templates",
     "parse_flow_template",
+    "start_flow",
 ]

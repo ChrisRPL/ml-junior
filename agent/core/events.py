@@ -9,6 +9,10 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from agent.core.redaction import REDACTION_NONE, redact_value
+from backend.assumption_ledger import (
+    ASSUMPTION_RECORDED_EVENT,
+    AssumptionRecord,
+)
 from backend.budget_ledger import (
     BUDGET_LIMIT_RECORDED_EVENT,
     BUDGET_USAGE_RECORDED_EVENT,
@@ -24,6 +28,14 @@ from backend.models import (
     ARTIFACT_REF_URI_SESSION_PREFIX,
     HumanRequestRequestedPayload,
     HumanRequestResolvedPayload,
+)
+from backend.policy_audit_ledger import (
+    PolicyAuditIntentRecord,
+    PolicyAuditResultRecord,
+)
+from agent.core.policy_audit_contracts import (
+    POLICY_AUDIT_INTENT_EVENT,
+    POLICY_AUDIT_RESULT_EVENT,
 )
 
 
@@ -646,8 +658,20 @@ class VerifierCompletedPayload(VerifierLedgerPayload):
     created_at: NonEmptyStr | None = None
 
 
+class PolicyAuditIntentRecordedPayload(PolicyAuditIntentRecord):
+    """Closed-schema payload for planned trust-action audit intents."""
+
+
+class PolicyAuditResultRecordedPayload(PolicyAuditResultRecord):
+    """Closed-schema payload for planned trust-action audit results."""
+
+
 class DecisionCardRecordedPayload(DecisionCardRecord):
     """Closed-schema payload for inert decision card records."""
+
+
+class AssumptionRecordedPayload(AssumptionRecord):
+    """Closed-schema payload for inert assumption records."""
 
 
 class ProofBundleRecordedPayload(ProofBundleRecord):
@@ -693,7 +717,10 @@ EVENT_PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "evidence_item.recorded": EvidenceItemRecordedPayload,
     "evidence_claim_link.recorded": EvidenceClaimLinkRecordedPayload,
     "verifier.completed": VerifierCompletedPayload,
+    POLICY_AUDIT_INTENT_EVENT: PolicyAuditIntentRecordedPayload,
+    POLICY_AUDIT_RESULT_EVENT: PolicyAuditResultRecordedPayload,
     "decision_card.recorded": DecisionCardRecordedPayload,
+    ASSUMPTION_RECORDED_EVENT: AssumptionRecordedPayload,
     "proof_bundle.recorded": ProofBundleRecordedPayload,
     BUDGET_LIMIT_RECORDED_EVENT: BudgetLimitRecordedPayload,
     BUDGET_USAGE_RECORDED_EVENT: BudgetUsageRecordedPayload,

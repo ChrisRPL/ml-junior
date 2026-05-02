@@ -12,8 +12,10 @@ REQUIRED_COMMANDS_BY_GROUP = {
         "/open",
         "/status",
         "/handoff",
+        "/handoff preview",
         "/export",
         "/doctor",
+        "/doctor local-inference",
     },
     "flow": {
         "/flows",
@@ -51,6 +53,7 @@ REQUIRED_COMMANDS_BY_GROUP = {
         "/ledger",
         "/ledger verify",
         "/proof bundle",
+        "/share-traces",
     },
     "code": {
         "/diff",
@@ -76,14 +79,28 @@ IMPLEMENTED_COMMANDS = {
     "/quit",
     "/flows",
     "/flow preview",
+    "/handoff preview",
+    "/doctor local-inference",
+    "/runs",
+    "/run show",
+    "/metrics",
+    "/artifacts",
+    "/evidence",
+    "/decisions",
+    "/assumptions",
+    "/ledger",
 }
 
 PRIORITY_BACKEND_CAPABILITIES = {
     "/status": "project.snapshot_read",
     "/phase": "workflow.phase_state",
     "/runs": "experiment.run_index",
+    "/artifacts": "artifact.index_read",
     "/evidence": "evidence.search",
+    "/decisions": "decision.log_read",
+    "/ledger": "ledger.read",
     "/handoff": "project.handoff_summary",
+    "/handoff preview": "project.handoff_preview",
 }
 
 
@@ -128,6 +145,21 @@ def test_backlog_commands_are_planned_except_existing_runtime_commands():
     for name in IMPLEMENTED_COMMANDS:
         assert registry[name].implemented is True
         assert registry[name].status == "implemented"
+
+
+def test_handoff_remains_planned_and_mutating_while_preview_is_read_only():
+    registry = _registry_by_name()
+
+    assert registry["/handoff"].implemented is False
+    assert registry["/handoff"].mutates_state is True
+    assert registry["/handoff"].required_backend_capability == (
+        "project.handoff_summary"
+    )
+    assert registry["/handoff preview"].implemented is True
+    assert registry["/handoff preview"].mutates_state is False
+    assert registry["/handoff preview"].required_backend_capability == (
+        "project.handoff_preview"
+    )
 
 
 def test_priority_commands_have_backend_capability_metadata():
@@ -214,6 +246,7 @@ def test_help_text_is_generated_from_registry_metadata():
 
     assert "[cyan]/help[/cyan]" in help_text
     assert "[cyan]/flow preview <id>[/cyan]" in help_text
+    assert "[cyan]/doctor local-inference [runtime] [model][/cyan]" in help_text
     assert "[cyan]/ledger verify [bundle][/cyan]" in help_text
     assert "Run environment diagnostics" in help_text
     assert "requires: project.snapshot_read" in help_text

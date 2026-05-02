@@ -191,14 +191,10 @@ def project_experiment_runs(
     """Project durable experiment run records from supplied events only."""
     return [
         run_record_from_event(event)
-        for event in sorted(
-            [
-                event
-                for event in events
-                if event.session_id == session_id
-                and event.event_type == EXPERIMENT_RUN_RECORDED_EVENT
-            ],
-            key=lambda event: (event.sequence, str(event.id)),
+        for event in _ordered_session_events(
+            session_id,
+            events,
+            EXPERIMENT_RUN_RECORDED_EVENT,
         )
     ]
 

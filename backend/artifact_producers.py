@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent.core.events import AgentEvent
+from backend.job_artifact_refs import (
+    ARTIFACT_REF_RECORDED_EVENT,
+    artifact_ref_recorded_payload,
+)
 from backend.models import (
     ArtifactLocator,
     ArtifactRefRecord,
@@ -191,3 +196,73 @@ def artifact_ref_record_from_producer_metadata(
             "created_at": spec.created_at,
         }
     )
+
+
+def artifact_ref_recorded_event_from_producer_metadata(
+    metadata: Mapping[str, Any] | ArtifactProducerRefSpec,
+    *,
+    sequence: int,
+    session_id: str | None = None,
+    event_id: str | None = None,
+) -> AgentEvent:
+    """Build an artifact_ref.recorded event from explicit producer metadata."""
+
+    record = artifact_ref_record_from_producer_metadata(metadata)
+    event_session_id = session_id or record.session_id
+    if event_session_id != record.session_id:
+        raise ValueError("event session_id must match artifact ref session_id")
+
+    values: dict[str, Any] = {
+        "session_id": event_session_id,
+        "sequence": sequence,
+        "event_type": ARTIFACT_REF_RECORDED_EVENT,
+        "data": artifact_ref_recorded_payload(record),
+    }
+    if event_id is not None:
+        values["id"] = event_id
+    return AgentEvent(**values)
+
+
+class ArtifactRefAppendAdapter:
+    """Narrow append adapter that persists artifact_ref.recorded AgentEvent envelopes.
+
+    The adapter is inert: it must be instantiated with an explicit store
+    callable and invoked by a caller. It does not wire itself into runtime
+    flows, routes, or tool execution.
+    """
+
+    def __init__(
+        self,
+        append_callable: Callable[[AgentEvent], AgentEvent],
+    ) -> None:
+        self._append = append_callable
+
+    def append(self, event: AgentEvent) -> AgentEvent:
+        """Validate, redact, and append an artifact_ref.recorded event envelope.
+
+        Raises:
+            ValueError: if the event type is unsupported or the sequence is
+                less than 1.
+            ValueError: if the session id is missing.
+        """
+        if event.event_type != ARTIFACT_REF_RECORDED_EVENT:
+            raise ValueError(
+                f"unsupported artifact ref event type: {event.event_type}"
+            )
+        if event.sequence < 1:
+            raise ValueError("sequence must be greater than or equal to 1")
+        if not isinstance(event.session_id, str) or not event.session_id.strip():
+            raise ValueError("artifact ref event envelope missing session_id")
+
+        redacted_event = event.redacted_copy()
+        stored_event = self._append(redacted_event)
+
+        if stored_event.sequence != redacted_event.sequence:
+            raise ValueError(
+                "artifact ref append adapter sequence mismatch: "
+                f"expected {redacted_event.sequence}, got {stored_event.sequence}"
+            )
+        if stored_event.session_id != redacted_event.session_id:
+            raise ValueError("artifact ref append adapter session_id mismatch")
+
+        return stored_event

@@ -7,6 +7,10 @@ from litellm import Message
 from pydantic import ValidationError
 
 from agent.core.events import AgentEvent, EVENT_PAYLOAD_MODELS
+from agent.core.policy_audit_contracts import (
+    POLICY_AUDIT_INTENT_EVENT,
+    POLICY_AUDIT_RESULT_EVENT,
+)
 from agent.core.session import Event, Session
 from backend.budget_ledger import (
     BUDGET_LIMIT_RECORDED_EVENT,
@@ -782,6 +786,71 @@ def _valid_decision_card_recorded_payload() -> dict:
     }
 
 
+def _valid_assumption_recorded_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "assumption_id": " assumption-1 ",
+        "source_event_sequence": 21,
+        "title": " Dataset label stability ",
+        "statement": " Validation labels are stable for this split. ",
+        "status": "open",
+        "confidence": "unknown",
+        "phase_id": " phase-data ",
+        "run_id": " run-1 ",
+        "decision_ids": [" decision-1 "],
+        "evidence_ids": [" evidence-1 "],
+        "claim_ids": [" claim-1 "],
+        "artifact_ids": [" artifact-1 "],
+        "proof_bundle_ids": [" proof-1 "],
+        "rationale": " Dataset card documents the label policy. ",
+        "validation_notes": " Recheck after data refresh. ",
+        "metadata": {"source": "synthetic-fixture"},
+        "privacy_class": "private",
+        "redaction_status": "none",
+        "created_at": " 2026-04-29T10:10:00Z ",
+        "updated_at": " 2026-04-29T10:11:00Z ",
+    }
+
+
+def _valid_policy_audit_intent_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "audit_id": " audit-1 ",
+        "actor": " human-review ",
+        "command": " /share-traces ",
+        "action": " trace_visibility_public ",
+        "target_ref": " traces/session-a ",
+        "approval_id": " approval-1 ",
+        "privacy_class": "sensitive",
+        "visibility": "public",
+        "redaction_status": "redacted",
+        "rollback_guidance": " Run /share-traces private. ",
+        "destination_repo": " user/ml-junior-sessions ",
+        "owner_namespace": " user ",
+        "include_legacy_sessions": False,
+        "dataset_card_warning_ack": True,
+        "revocation_guidance": " Flip the dataset private and revoke leaked tokens. ",
+        "created_at": " 2026-05-02T10:10:00Z ",
+        "metadata": {"source": "synthetic-fixture"},
+    }
+
+
+def _valid_policy_audit_result_payload() -> dict:
+    return {
+        "session_id": " session-a ",
+        "audit_id": " audit-result-1 ",
+        "intent_audit_id": " audit-1 ",
+        "status": "succeeded",
+        "redaction_status": "redacted",
+        "result_ref": " hf://datasets/user/ml-junior-sessions ",
+        "destination_repo": " user/ml-junior-sessions ",
+        "owner_namespace": " user ",
+        "checked_at": " 2026-05-02T10:11:00Z ",
+        "created_at": " 2026-05-02T10:11:01Z ",
+        "metadata": {"source": "synthetic-fixture"},
+    }
+
+
 def _valid_proof_bundle_recorded_payload() -> dict:
     return {
         "session_id": " session-a ",
@@ -1433,6 +1502,141 @@ def test_decision_card_recorded_payload_validates_and_normalizes():
     assert event.data["manifest_refs"][0]["manifest_id"] == "manifest-1"
     assert event.data["manifest_refs"][0]["checksum_ids"] == ["checksum-1"]
     assert event.data["checksum_refs"][0]["value"] == "abc123"
+
+
+def test_assumption_recorded_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=20,
+        event_type="assumption.recorded",
+        data=_valid_assumption_recorded_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["assumption_id"] == "assumption-1"
+    assert event.data["title"] == "Dataset label stability"
+    assert event.data["statement"] == "Validation labels are stable for this split."
+    assert event.data["status"] == "open"
+    assert event.data["confidence"] == "unknown"
+    assert event.data["proof_bundle_ids"] == ["proof-1"]
+
+
+def test_assumption_recorded_payload_rejects_extra_fields_and_duplicate_refs():
+    payload = _valid_assumption_recorded_payload()
+    payload["unexpected"] = "nope"
+
+    with pytest.raises(ValidationError, match="unexpected"):
+        AgentEvent(
+            session_id="session-a",
+            sequence=20,
+            event_type="assumption.recorded",
+            data=payload,
+        )
+
+    duplicate_refs = _valid_assumption_recorded_payload()
+    duplicate_refs["evidence_ids"] = ["evidence-1", "evidence-1"]
+
+    with pytest.raises(ValidationError, match="duplicate evidence_ids"):
+        AgentEvent(
+            session_id="session-a",
+            sequence=20,
+            event_type="assumption.recorded",
+            data=duplicate_refs,
+        )
+
+
+def test_assumption_recorded_redacted_copy_scrubs_secret_payload():
+    secret = "hf_assumptioneventsecret123456789"
+    payload = _valid_assumption_recorded_payload()
+    payload["statement"] = f"Secret token={secret}"
+    payload["rationale"] = f"Authorization: Bearer {secret}"
+    payload["metadata"] = {"token": secret}
+
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=20,
+        event_type="assumption.recorded",
+        data=payload,
+    )
+    redacted = event.redacted_copy()
+
+    assert redacted.redaction_status == "redacted"
+    assert redacted.data["redaction_status"] == "redacted"
+    assert secret not in repr(redacted.data)
+    assert "[REDACTED]" in redacted.data["statement"]
+
+
+def test_policy_audit_intent_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=20,
+        event_type=POLICY_AUDIT_INTENT_EVENT,
+        data=_valid_policy_audit_intent_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["audit_id"] == "audit-1"
+    assert event.data["actor"] == "human-review"
+    assert event.data["command"] == "/share-traces"
+    assert event.data["action"] == "trace_visibility_public"
+    assert event.data["destination_repo"] == "user/ml-junior-sessions"
+    assert event.data["owner_namespace"] == "user"
+    assert event.data["include_legacy_sessions"] is False
+    assert event.data["dataset_card_warning_ack"] is True
+
+
+def test_policy_audit_result_payload_validates_and_normalizes():
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=20,
+        event_type=POLICY_AUDIT_RESULT_EVENT,
+        data=_valid_policy_audit_result_payload(),
+    )
+
+    assert event.event_type in EVENT_PAYLOAD_MODELS
+    assert event.data["session_id"] == "session-a"
+    assert event.data["audit_id"] == "audit-result-1"
+    assert event.data["intent_audit_id"] == "audit-1"
+    assert event.data["status"] == "succeeded"
+    assert event.data["result_ref"] == "hf://datasets/user/ml-junior-sessions"
+
+
+def test_policy_audit_payload_rejects_unknown_fields():
+    payload = _valid_policy_audit_intent_payload()
+    payload["unexpected"] = "nope"
+
+    with pytest.raises(ValidationError, match="unexpected"):
+        AgentEvent(
+            session_id="session-a",
+            sequence=20,
+            event_type=POLICY_AUDIT_INTENT_EVENT,
+            data=payload,
+        )
+
+
+def test_policy_audit_redacted_copy_scrubs_secret_payload():
+    secret = "hf_auditsecret123456789"
+    payload = _valid_policy_audit_intent_payload()
+    payload["destination_repo"] = f"user/ml-junior-sessions?token={secret}"
+    payload["metadata"] = {
+        "authorization": f"Bearer {secret}",
+        "local_path": "/Users/krzysztof/private/session.jsonl",
+    }
+
+    event = AgentEvent(
+        session_id="session-a",
+        sequence=20,
+        event_type=POLICY_AUDIT_INTENT_EVENT,
+        data=payload,
+    )
+    redacted = event.redacted_copy()
+
+    assert redacted.redaction_status == "redacted"
+    assert redacted.data["redaction_status"] == "redacted"
+    assert secret not in repr(redacted.data)
+    assert "[REDACTED]" in redacted.data["destination_repo"]
 
 
 def test_proof_bundle_recorded_payload_validates_and_normalizes_alias():

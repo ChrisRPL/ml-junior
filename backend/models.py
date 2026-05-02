@@ -970,3 +970,41 @@ class LLMHealthResponse(BaseModel):
     model: str
     error: str | None = None
     error_type: str | None = None  # "auth" | "credits" | "rate_limit" | "network" | "unknown"
+
+
+class FlowStartRequest(BaseModel):
+    """Request to start a flow from a template."""
+
+    session_id: NonEmptyStr
+    inputs: dict[str, Any] = Field(default_factory=dict)
+
+
+class FlowStartResponse(BaseModel):
+    """Response when a flow is successfully started."""
+
+    flow_id: str
+    session_id: str
+    template_id: str
+    template_version: str
+    phase_id: str
+    phase_name: str
+    status: str
+    started_at: str
+
+
+class SessionResumeMetadata(BaseModel):
+    """Server-side reconstructed session metadata for resume."""
+
+    session_id: str
+    owner_id: str
+    model: str
+    status: str
+    last_event_sequence: int = 0
+    last_operation_id: str | None = None
+    attached_flows: list[dict[str, Any]] = Field(default_factory=list)
+    workflow_phase_id: str | None = None
+    workflow_phase_status: str | None = None
+    pending_approval_count: int = 0
+    active_job_count: int = 0
+    can_resume: bool = False
+    resume_reason: str = "server_side_resume_not_implemented"

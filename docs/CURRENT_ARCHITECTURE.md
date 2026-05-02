@@ -279,15 +279,24 @@ Current behavior:
   A pure artifact producer adapter can convert explicit caller-supplied
   producer metadata into `ArtifactRefRecord` rows with canonical `ref_uri` and
   typed locators.
-  Nothing wires that store to job launch, polling, artifact discovery, routes,
-  export behavior, or workflow producers yet.
+  `GET /api/session/{session_id}/artifacts` returns read-only artifact refs
+  projected from persisted `artifact_ref.recorded` events for an accessible
+  durable session. `GET
+  /api/session/{session_id}/artifacts/{artifact_id}` returns the latest
+  projected artifact ref for one artifact id from the same persisted event
+  stream. Nothing wires that store to job launch, polling, artifact discovery,
+  export behavior, artifact blob reads, or workflow producers yet.
 - Dataset lineage currently exists as closed, caller-supplied manifest/diff
   models, an inert transform/filter/augment/merge lineage DAG schema, and pure
   sha256 blob digest/path conventions. Experiment run records can reference
   dataset manifests and lineage ids directly as explicit schema-only refs,
-  alongside existing dataset snapshot refs. This does not create snapshots,
-  infer lineage, walk files, read/write blob caches, call datasets/HF services,
-  or emit runtime events.
+  alongside existing dataset snapshot refs. `GET
+  /api/session/{session_id}/runs` returns read-only experiment runs projected
+  from persisted `experiment.run_recorded` events for an accessible durable
+  session. `GET /api/session/{session_id}/runs/{run_id}` returns the latest
+  projected record for one run id from the same persisted event stream. These
+  routes do not create snapshots, infer lineage, walk files, read/write blob
+  caches, call datasets/HF services, compare/fork runs, or emit runtime events.
 - Built-in flow templates live under `backend/builtin_flow_templates/`.
   `GET /api/flows` returns the read-only catalog. `GET
   /api/flows/{template_id}/preview` returns inputs, required inputs, budgets,
@@ -342,10 +351,11 @@ Current agent/backend event types validated or projected in code:
   ledger metadata.
 - `evidence_item.recorded`, `evidence_claim_link.recorded`, and
   `verifier.completed`: evidence/verifier metadata for workflow projection.
-- `decision_card.recorded` and `proof_bundle.recorded`: inert decision/proof
-  metadata for future audit bundles. They validate explicit caller-supplied
-  records and project into `evidence_summary`, but do not sign, export, or
-  block final answers.
+- `decision_card.recorded`, `assumption.recorded`, and
+  `proof_bundle.recorded`: inert decision/assumption/proof metadata for future
+  audit bundles and notebooks. They validate explicit caller-supplied records
+  and project into `evidence_summary`, but do not infer assumptions from chat,
+  sign, export, or block final answers.
 - `budget.limit_recorded` and `budget.usage_recorded`: inert budget limit and
   usage ledger metadata. They validate explicit caller-supplied records and
   project into `WorkflowState.budget`, but do not enforce spend caps, consume
@@ -385,6 +395,14 @@ Backend routes:
   message summary.
 - `GET /api/session/{session_id}`: session metadata.
 - `GET /api/session/{session_id}/workflow`: read-only workflow projection.
+- `GET /api/session/{session_id}/artifacts`: read-only projected artifact refs
+  from persisted events.
+- `GET /api/session/{session_id}/artifacts/{artifact_id}`: read-only projected
+  detail for one artifact id from persisted events.
+- `GET /api/session/{session_id}/runs`: read-only projected experiment runs
+  from persisted events.
+- `GET /api/session/{session_id}/runs/{run_id}`: read-only projected detail for
+  one experiment run id from persisted events.
 - `GET /api/session/{session_id}/operations`: redacted durable operation list.
 - `GET /api/session/{session_id}/operations/{operation_id}`: one redacted
   durable operation scoped to the session.
@@ -417,6 +435,14 @@ Current CLI slash commands:
 - `/quit` and `/exit`
 - `/flows`
 - `/flow preview <id>`
+- `/runs [filter]`
+- `/run show <id>`
+- `/metrics [run]`
+- `/artifacts [filter]`
+- `/evidence [query]`
+- `/decisions [query]`
+- `/handoff preview`
+- `/doctor local-inference [runtime] [model]`
 
 Current slash command registry/completion additions:
 
@@ -425,14 +451,65 @@ Current slash command registry/completion additions:
   backend capability.
 - Implemented command aliases include `/exit`, `quit`, and `exit` for `/quit`.
 - Planned project commands are registered for help/completion only: `/new`,
-  `/open`, `/handoff`, `/export`, and `/doctor`.
+  `/open`, `/handoff`, `/export`, and `/doctor`. The read-only
+  `/handoff preview` and `/doctor local-inference` subcommands are implemented.
 - Planned flow/workflow commands are registered for help/completion only:
   `/flow start`, `/flow pause`, `/flow resume`, `/flow fork`, `/phase`, and
   `/plan`.
+- Read-only `/runs [filter]`, `/run show <id>`, `/metrics [run]`, and
+  `/artifacts [filter]` render current local CLI session projections from
+  recorded `experiment.run_recorded` and `artifact_ref.recorded` events by
+  default. If `MLJ_BACKEND_BASE_URL` and `MLJ_BACKEND_SESSION_ID` are both set,
+  they switch to opt-in backend index mode and read only the durable session
+  run/artifact index routes. Backend index mode can use
+  `MLJ_BACKEND_BEARER_TOKEN` for production auth and does not submit messages,
+  replay sessions, inspect blobs, call providers/Trackio, or emit events.
+- Read-only `/evidence [query]` renders current local CLI session
+  `WorkflowState.evidence_summary` rows from recorded evidence-summary event
+  types only. It does not call backend routes or durable stores, create/link
+  evidence, verify claims, export proof bundles, inspect blobs/log bodies, call
+  providers/Trackio, ingest metrics, or emit events.
+- Read-only `/decisions [query]` renders current local CLI session decision
+  cards from the same redacted `WorkflowState.evidence_summary` projection. It
+  does not call backend routes or durable stores, create/edit decisions, infer
+  assumptions, export proof bundles, inspect blobs/log bodies, call providers/
+  Trackio, or emit events.
+- Read-only `/assumptions [query]` renders current local CLI session
+  assumptions from explicit `assumption.recorded` rows already projected into
+  `WorkflowState.evidence_summary`. It does not call backend routes or durable
+  stores, create/edit assumptions, infer assumptions from chat, export proof
+  bundles, inspect blobs/log bodies, call providers/Trackio, or emit events.
+- Read-only `/ledger [query]` renders redacted current local CLI session
+  `AgentEvent` envelope metadata only: sequence, event id, event type,
+  timestamp, schema version, redaction status, safe top-level refs, and
+  top-level payload keys. It does not read durable stores, display full
+  payload/body/blob/log values, verify/sign/export, or emit events.
+- `agent/core/policy_audit_contracts.py` defines inert policy, approval, and
+  audit contracts for planned trust-sensitive commands: `/share-traces
+  public|private`, `/ledger verify [bundle]`, and `/proof bundle [run]`.
+  These contracts expose approval copy, side effects, rollback guidance,
+  credential usage, privacy defaults, audit event names, required audit fields,
+  and redaction requirements. The event registry also validates closed
+  `policy.audit_intent_recorded` and `policy.audit_result_recorded` payloads
+  for future audit writes. `backend.policy_audit_ledger` provides inert
+  payload, redaction, event validation, session projection, result correlation,
+  pending-intent, pure redacted event-draft builder, and pure redacted
+  `AgentEvent` envelope builder helpers for those records. They do not
+  dispatch commands, emit audit events into runtime
+  sessions, mutate Hub visibility, verify ledgers, create proof bundles, or
+  write/export data.
+- Read-only `/handoff preview` renders a current local CLI session handoff
+  preview from redacted logged events, `build_workflow_state(...)`, and the
+  pure `generate_handoff_summary(...)` helper. `/handoff [path]` remains
+  planned and mutating. Preview mode does not emit `handoff.summary_created`,
+  export files, call backend routes or durable stores, invoke LLM summarization,
+  inspect blobs/log bodies, start/resume/fork workflows, or mutate state.
 - Planned experiment/tool/evidence/code commands are registered for
-  help/completion only, including `/runs`, `/run show`, `/tools`, `/jobs`,
-  `/approve`, `/deny`, `/ledger verify`, `/diff`, `/test`, `/commit`, and
-  `/pr`. They print a capability-required message instead of executing.
+  help/completion only, including `/experiments`, `/run compare`, `/run fork`,
+  `/tools`, `/jobs`, `/approve`, `/deny`, `/memory`, `/ledger verify`,
+  `/proof bundle`, `/share-traces`, `/diff`, `/test`, `/commit`, and `/pr`.
+  They print a
+  capability-required message instead of executing.
 
 Headless CLI:
 
@@ -509,9 +586,10 @@ Current behavior:
   caller-supplied payloads or errors; they do not perform network I/O or start
   local daemons. A pure local inference doctor report model combines supplied
   descriptors and classifications into status, host class, redacted messages,
-  and remediation hints without implementing the CLI command or probing
-  daemons. Endpoint resolution, probe logic, and doctor-report helpers live
-  behind the compatibility `agent.core.local_inference` facade.
+  and remediation hints. CLI `/doctor local-inference` renders those local
+  descriptors and config-error reports without probing daemons. Endpoint
+  resolution, probe logic, and doctor-report helpers live behind the
+  compatibility `agent.core.local_inference` facade.
 - Backend-created sessions use sandbox mode by default. Sandbox mode exposes
   `sandbox_create`, `bash`, `read`, `write`, and `edit` backed by a Hugging Face
   Space sandbox.

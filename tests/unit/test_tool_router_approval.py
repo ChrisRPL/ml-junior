@@ -428,6 +428,119 @@ async def test_run_agent_uses_router_policy_and_emits_rich_approval_payload(
     }
 
 
+async def test_run_agent_projects_hf_compute_policy_to_event_and_pending_state(
+    monkeypatch,
+    event_queue,
+    event_collector,
+):
+    tool_call = llm_tool_call(
+        "tc_scheduled_job",
+        "hf_jobs",
+        {
+            "operation": "scheduled run",
+            "hardware_flavor": "a10g-large",
+            "timeout": "2h",
+            "token": "hf_eventsecret123456789",
+        },
+    )
+    fake_llm = FakeAcompletion(
+        FakeCompletion(llm_message(None, [tool_call]), finish_reason="tool_calls")
+    )
+    patch_agent_runtime(monkeypatch, fake_llm)
+
+    class PolicyEngineRouter:
+        tools: dict[str, Any] = {}
+
+        def get_tool_specs_for_llm(self) -> list[dict[str, Any]]:
+            return [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "hf_jobs",
+                        "description": "fake jobs tool",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ]
+
+        async def call_tool(self, *_args: Any, **_kwargs: Any) -> tuple[str, bool]:
+            raise AssertionError("approval-gated tool should not execute")
+
+    session = Session(
+        event_queue,
+        config=config_for_approval(max_iterations=3, confirm_cpu_jobs=False),
+        tool_router=PolicyEngineRouter(),
+        stream=False,
+    )
+
+    result = await Handlers.run_agent(session, "schedule gpu job")
+
+    events = await event_collector(event_queue)
+    approval_event = next(event for event in events if event.event_type == "approval_required")
+    approval_tool = approval_event.data["tools"][0]
+    pending_policy = session.pending_approval["policy"]["tc_scheduled_job"]
+
+    expected_policy = {
+        "risk": "high",
+        "side_effects": ["Starts or schedules a Hugging Face compute job."],
+        "rollback": "Cancel the job or delete the scheduled job.",
+        "budget_impact": (
+            "Estimated a10g-large single_gpu spend: about $3.00 for 2h. "
+            "Recurring schedule may multiply spend until suspended or deleted."
+        ),
+        "credential_usage": ["hf_token"],
+        "reason": (
+            "Hugging Face job launch risk: single_gpu; spend=medium; "
+            "duration=2h (timeout); scheduled recurrence requires approval; "
+            "uncertainty=recurrence_multiplier_unknown."
+        ),
+    }
+
+    assert result is None
+    assert approval_tool == {
+        "tool": "hf_jobs",
+        "arguments": {
+            "operation": "scheduled run",
+            "hardware_flavor": "a10g-large",
+            "timeout": "2h",
+            "token": "[REDACTED]",
+        },
+        "tool_call_id": "tc_scheduled_job",
+        **expected_policy,
+    }
+    assert pending_policy == expected_policy
+
+
+def test_registered_hf_jobs_router_preserves_unknown_compute_risk_metadata():
+    router = ToolRouter({})
+
+    decision = router.evaluate_policy(
+        "hf_jobs",
+        {
+            "operation": "scheduled run",
+            "hardware_flavor": "future-h200x8",
+            "timeout": "bogus",
+        },
+        config=config_for_approval(confirm_cpu_jobs=False),
+    )
+    metadata = decision.approval_metadata()
+
+    assert decision.requires_approval is True
+    assert metadata["risk"] == "unknown"
+    assert metadata["side_effects"] == [
+        "Starts or schedules a Hugging Face compute job."
+    ]
+    assert metadata["rollback"] == "Cancel the job or delete the scheduled job."
+    assert metadata["budget_impact"] == (
+        "Unknown HF compute spend; hardware is missing or not recognized in "
+        "the local flavor list."
+    )
+    assert metadata["credential_usage"] == ["hf_token"]
+    assert "scheduled recurrence requires approval" in metadata["reason"]
+    assert "uncertainty=unparsed_timeout, unknown_hardware" in metadata["reason"]
+    assert "recurrence_multiplier_unknown" in metadata["reason"]
+
+
 async def test_call_tool_routes_registered_handler_and_preserves_return_contract():
     calls: list[tuple[dict[str, Any], Any, str | None]] = []
     session = object()

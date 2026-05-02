@@ -16,6 +16,9 @@ from agent.core.events import AgentEvent
 from agent.core.session import Event, OpType, Session
 from agent.core.tools import ToolRouter
 from backend.event_store import SQLiteEventStore
+from backend.experiment_ledger import project_experiment_runs
+from backend.job_artifact_refs import project_artifact_refs
+from backend.models import ArtifactRefRecord, ExperimentRunRecord
 from backend.operation_store import (
     OPERATION_FAILED,
     OPERATION_PENDING,
@@ -675,6 +678,32 @@ class SessionManager:
             operations=self.operation_store.list_by_session(session_id),
         )
 
+    def list_artifact_refs(self, session_id: str) -> list[ArtifactRefRecord]:
+        """Return artifact refs projected from persisted session events."""
+        return project_artifact_refs(session_id, self.event_store.replay(session_id))
+
+    def get_artifact_ref(
+        self, session_id: str, artifact_id: str
+    ) -> ArtifactRefRecord | None:
+        """Return the latest projected artifact ref for one artifact id."""
+        for record in reversed(self.list_artifact_refs(session_id)):
+            if record.artifact_id == artifact_id:
+                return record
+        return None
+
+    def list_experiment_runs(self, session_id: str) -> list[ExperimentRunRecord]:
+        """Return experiment runs projected from persisted session events."""
+        return project_experiment_runs(session_id, self.event_store.replay(session_id))
+
+    def get_experiment_run(
+        self, session_id: str, run_id: str
+    ) -> ExperimentRunRecord | None:
+        """Return the latest projected experiment run record for one run id."""
+        for record in reversed(self.list_experiment_runs(session_id)):
+            if record.run_id == run_id:
+                return record
+        return None
+
     def get_operation(
         self, session_id: str, operation_id: str
     ) -> OperationRecord | None:
@@ -683,6 +712,66 @@ class SessionManager:
         if record is None or record.session_id != session_id:
             return None
         return record
+
+    def get_session_resume_metadata(
+        self,
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        """Reconstruct session resume metadata from durable stores.
+
+        Returns None if the session has no durable record.
+        """
+        record = self.session_store.get(session_id)
+        if record is None:
+            return None
+
+        events = self.event_store.replay(session_id)
+        last_sequence = events[-1].sequence if events else 0
+
+        attached_flows: list[dict[str, Any]] = []
+        for event in events:
+            if event.event_type == "phase.started" and event.data:
+                flow_id = event.data.get("flow_id")
+                if flow_id:
+                    attached_flows.append(
+                        {
+                            "flow_id": flow_id,
+                            "template_id": event.data.get("template_id"),
+                            "template_version": event.data.get("template_version"),
+                            "phase_id": event.data.get("phase_id"),
+                            "started_at": event.data.get("started_at"),
+                        }
+                    )
+
+        operations = self.operation_store.list_by_session(session_id)
+        last_operation_id = operations[-1].id if operations else None
+
+        workflow_state = build_workflow_state(
+            session_id=session_id,
+            events=events,
+            session_record=record,
+            operations=operations,
+        )
+
+        return {
+            "session_id": record.id,
+            "owner_id": record.owner_id,
+            "model": record.model,
+            "status": record.status,
+            "last_event_sequence": last_sequence,
+            "last_operation_id": last_operation_id,
+            "attached_flows": attached_flows,
+            "workflow_phase_id": workflow_state.phase.id
+            if workflow_state.phase.status != "placeholder"
+            else None,
+            "workflow_phase_status": workflow_state.phase.status
+            if workflow_state.phase.status != "placeholder"
+            else None,
+            "pending_approval_count": len(record.pending_approval_refs),
+            "active_job_count": len(record.active_job_refs),
+            "can_resume": False,
+            "resume_reason": "server_side_resume_not_implemented",
+        }
 
     async def interrupt(self, session_id: str) -> bool:
         """Interrupt a session by signalling cancellation directly (bypasses queue)."""

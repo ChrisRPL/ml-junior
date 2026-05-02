@@ -68,6 +68,82 @@ def test_slash_completion_preserves_command_metadata_for_planned_commands() -> N
     )
     assert rows[0].text == "/ledger verify "
 
+    share_rows = slash_command_completion_rows("/share-traces")
+
+    assert share_rows[0].spec.name == "/share-traces"
+    assert share_rows[0].spec.implemented is False
+    assert share_rows[0].display_meta == (
+        "evidence | planned | high risk | mutates state | "
+        "requires: trace.share_visibility"
+    )
+
+
+def test_slash_completion_marks_read_only_index_commands_implemented() -> None:
+    rows = slash_command_completion_rows("/runs")
+
+    assert rows[0].spec.name == "/runs"
+    assert rows[0].spec.implemented is True
+    assert rows[0].display_meta == (
+        "experiment | implemented | safe risk | read-only | "
+        "requires: experiment.run_index"
+    )
+
+    metric_rows = slash_command_completion_rows("/metrics")
+
+    assert metric_rows[0].spec.name == "/metrics"
+    assert metric_rows[0].spec.implemented is True
+    assert metric_rows[0].display_meta == (
+        "experiment | implemented | safe risk | read-only | "
+        "requires: experiment.metrics_read"
+    )
+
+    evidence_rows = slash_command_completion_rows("/evidence")
+
+    assert evidence_rows[0].spec.name == "/evidence"
+    assert evidence_rows[0].spec.implemented is True
+    assert evidence_rows[0].display_meta == (
+        "evidence | implemented | safe risk | read-only | "
+        "requires: evidence.search"
+    )
+
+    decision_rows = slash_command_completion_rows("/decisions")
+
+    assert decision_rows[0].spec.name == "/decisions"
+    assert decision_rows[0].spec.implemented is True
+    assert decision_rows[0].display_meta == (
+        "evidence | implemented | safe risk | read-only | "
+        "requires: decision.log_read"
+    )
+
+    assumption_rows = slash_command_completion_rows("/assumptions")
+
+    assert assumption_rows[0].spec.name == "/assumptions"
+    assert assumption_rows[0].spec.implemented is True
+    assert assumption_rows[0].display_meta == (
+        "evidence | implemented | safe risk | read-only | "
+        "requires: assumption.registry_read"
+    )
+
+    ledger_rows = slash_command_completion_rows("/ledger")
+
+    assert ledger_rows[0].spec.name == "/ledger"
+    assert ledger_rows[0].spec.implemented is True
+    assert ledger_rows[0].display_meta == (
+        "evidence | implemented | safe risk | read-only | requires: ledger.read"
+    )
+
+
+def test_slash_completion_marks_handoff_preview_implemented() -> None:
+    rows = slash_command_completion_rows("/handoff p")
+
+    assert rows[0].spec.name == "/handoff preview"
+    assert rows[0].spec.implemented is True
+    assert rows[0].display_meta == (
+        "project | implemented | safe risk | read-only | "
+        "requires: project.handoff_preview"
+    )
+    assert rows[0].text == "/handoff preview"
+
 
 def test_slash_completion_skips_non_slash_text_and_command_arguments() -> None:
     assert slash_command_completion_rows("hello /model") == ()

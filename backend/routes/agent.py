@@ -21,19 +21,25 @@ from fastapi.responses import StreamingResponse
 from litellm import acompletion
 from models import (
     ApprovalRequest,
+    ArtifactRefRecord,
+    ExperimentRunRecord,
     FlowCatalogItem,
     FlowPreviewResponse,
+    FlowStartRequest,
+    FlowStartResponse,
     FlowTemplateSourceDescriptor,
     HealthResponse,
     LLMHealthResponse,
     OperationResponse,
     SessionInfo,
+    SessionResumeMetadata,
     SessionResponse,
     SubmitRequest,
     TruncateRequest,
     WorkflowState,
 )
 from backend.flow_templates import (
+    FlowStartError,
     FlowTemplateError,
     FlowTemplateNotFoundError,
     build_flow_catalog_item,
@@ -41,6 +47,7 @@ from backend.flow_templates import (
     get_builtin_flow_template,
     list_flow_template_sources,
     list_flow_templates,
+    start_flow,
 )
 from session_manager import (
     MAX_SESSIONS,
@@ -336,6 +343,53 @@ async def get_flow_preview(
     return FlowPreviewResponse(**build_flow_preview(template))
 
 
+@router.post("/flows/{template_id}/start", response_model=FlowStartResponse)
+async def post_flow_start(
+    template_id: str,
+    request: FlowStartRequest,
+    user: dict = Depends(get_current_user),
+) -> FlowStartResponse:
+    """Initialize a workflow instance from a flow template.
+
+    Creates the initial phase state, persists a phase.started event, and
+    returns a durable flow handle. Strictly initialization — no phase
+    auto-advance.
+    """
+    _check_session_access(request.session_id, user)
+    _check_active_session(request.session_id)
+
+    try:
+        template = get_builtin_flow_template(template_id)
+    except FlowTemplateNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "flow_template_not_found",
+                "template_id": template_id,
+                "message": str(exc),
+            },
+        ) from exc
+
+    try:
+        result = start_flow(
+            template,
+            request.session_id,
+            append_callable=session_manager.event_store.append,
+            inputs=request.inputs,
+        )
+    except FlowStartError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "flow_start_failed",
+                "template_id": template_id,
+                "message": str(exc),
+            },
+        ) from exc
+
+    return FlowStartResponse(**result)
+
+
 _TITLE_STRIP_CHARS = str.maketrans("", "", "`*_~#[]()")
 
 
@@ -521,6 +575,91 @@ async def get_session_workflow(
     """Return a read-only workflow projection for an accessible session."""
     _check_session_access(session_id, user)
     return session_manager.get_workflow_state(session_id)
+
+
+@router.get(
+    "/session/{session_id}/resume",
+    response_model=SessionResumeMetadata,
+)
+async def get_session_resume(
+    session_id: str, user: dict = Depends(get_current_user)
+) -> SessionResumeMetadata:
+    """Return server-side reconstructed session metadata for resume.
+
+    Reconstructs session context from durable session store, event store,
+    operation store, and workflow projections. Executable resume is
+    intentionally not implemented yet.
+    """
+    _check_session_access(session_id, user)
+    metadata = session_manager.get_session_resume_metadata(session_id)
+    if metadata is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "session_resume_not_found",
+                "session_id": session_id,
+                "message": "No durable session record found for resume.",
+            },
+        )
+    return SessionResumeMetadata(**metadata)
+
+
+@router.get(
+    "/session/{session_id}/artifacts",
+    response_model=list[ArtifactRefRecord],
+)
+async def list_session_artifacts(
+    session_id: str, user: dict = Depends(get_current_user)
+) -> list[ArtifactRefRecord]:
+    """Return read-only artifact refs for an accessible durable session."""
+    _check_session_access(session_id, user)
+    return session_manager.list_artifact_refs(session_id)
+
+
+@router.get(
+    "/session/{session_id}/artifacts/{artifact_id}",
+    response_model=ArtifactRefRecord,
+)
+async def get_session_artifact(
+    session_id: str,
+    artifact_id: str,
+    user: dict = Depends(get_current_user),
+) -> ArtifactRefRecord:
+    """Return one read-only artifact ref for an accessible durable session."""
+    _check_session_access(session_id, user)
+    record = session_manager.get_artifact_ref(session_id, artifact_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return record
+
+
+@router.get(
+    "/session/{session_id}/runs",
+    response_model=list[ExperimentRunRecord],
+)
+async def list_session_runs(
+    session_id: str, user: dict = Depends(get_current_user)
+) -> list[ExperimentRunRecord]:
+    """Return read-only experiment runs for an accessible durable session."""
+    _check_session_access(session_id, user)
+    return session_manager.list_experiment_runs(session_id)
+
+
+@router.get(
+    "/session/{session_id}/runs/{run_id}",
+    response_model=ExperimentRunRecord,
+)
+async def get_session_run(
+    session_id: str,
+    run_id: str,
+    user: dict = Depends(get_current_user),
+) -> ExperimentRunRecord:
+    """Return one read-only experiment run for an accessible durable session."""
+    _check_session_access(session_id, user)
+    record = session_manager.get_experiment_run(session_id, run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return record
 
 
 @router.get(

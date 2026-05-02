@@ -29,7 +29,18 @@ from agent.core import model_switcher
 from agent.core.agent_loop import submission_loop
 from agent.core.command_completions import build_slash_command_completer
 from agent.core.commands import parse_slash_command
+from agent.core.backend_index_client import (
+    BackendIndexClientError,
+    BackendIndexConfig,
+    BackendIndexConfigError,
+    render_backend_index_command,
+)
+from agent.core.doctor_commands import render_doctor_command
+from agent.core.evidence_commands import EvidenceCommandError, render_evidence_command
 from agent.core.flow_commands import FlowCommandError, render_flow_command
+from agent.core.handoff_commands import HandoffCommandError, render_handoff_command
+from agent.core.index_commands import IndexCommandError, render_index_command
+from agent.core.ledger_commands import LedgerCommandError, render_ledger_command
 from agent.core.session import OpType
 from agent.core.tools import ToolRouter
 from agent.utils.reliability_checks import check_training_script_save_pattern
@@ -861,6 +872,52 @@ async def _handle_slash_command(
             print(render_flow_command(command, arg))
         except FlowCommandError as exc:
             print(str(exc))
+        return None
+
+    if command in {"/runs", "/run show", "/metrics", "/artifacts"}:
+        session = session_holder[0] if session_holder else None
+        try:
+            backend_index_config = BackendIndexConfig.from_env()
+            if backend_index_config is not None:
+                print(
+                    await render_backend_index_command(
+                        command,
+                        arg,
+                        config=backend_index_config,
+                    )
+                )
+            else:
+                print(render_index_command(command, arg, session=session))
+        except (BackendIndexConfigError, BackendIndexClientError, IndexCommandError) as exc:
+            print(str(exc))
+        return None
+
+    if command in {"/evidence", "/decisions", "/assumptions"}:
+        session = session_holder[0] if session_holder else None
+        try:
+            print(render_evidence_command(command, arg, session=session))
+        except EvidenceCommandError as exc:
+            print(str(exc))
+        return None
+
+    if command == "/handoff preview":
+        session = session_holder[0] if session_holder else None
+        try:
+            print(render_handoff_command(command, arg, session=session))
+        except HandoffCommandError as exc:
+            print(str(exc))
+        return None
+
+    if command == "/ledger":
+        session = session_holder[0] if session_holder else None
+        try:
+            print(render_ledger_command(command, arg, session=session))
+        except LedgerCommandError as exc:
+            print(str(exc))
+        return None
+
+    if command == "/doctor local-inference":
+        print(render_doctor_command(command, arg, config=config))
         return None
 
     print(f"Unknown command: {command}. Type /help for available commands.")

@@ -368,8 +368,8 @@ async def test_pending_approval_refs_persist_and_clear_after_approval(
             name="hf_jobs",
             arguments=json.dumps(
                 {
-                    "operation": "run",
-                    "hardware": "cpu-basic",
+                    "operation": "scheduled run",
+                    "hardware": "future-h200x8",
                     "token": "hf_pendingsecret123456789",
                 }
             ),
@@ -382,12 +382,22 @@ async def test_pending_approval_refs_persist_and_clear_after_approval(
                 "tool_calls": [tool_call],
                 "policy": {
                     "tc_123": {
-                        "risk": "medium",
-                        "side_effects": ["remote_compute"],
-                        "rollback": "Cancel the job.",
-                        "budget_impact": "May incur CPU compute costs.",
+                        "risk": "unknown",
+                        "side_effects": [
+                            "Starts or schedules a Hugging Face compute job."
+                        ],
+                        "rollback": "Cancel the job or delete the scheduled job.",
+                        "budget_impact": (
+                            "Unknown HF compute spend; hardware is missing or not "
+                            "recognized in the local flavor list."
+                        ),
                         "credential_usage": ["hf_token"],
-                        "reason": "CPU job launch requires approval.",
+                        "reason": (
+                            "Hugging Face job launch risk: unknown; spend=high; "
+                            "duration=30m (default_timeout); scheduled recurrence "
+                            "requires approval; uncertainty=default_duration, "
+                            "unknown_hardware, recurrence_multiplier_unknown."
+                        ),
                     }
                 },
             }
@@ -416,18 +426,29 @@ async def test_pending_approval_refs_persist_and_clear_after_approval(
                 "tool": "hf_jobs",
                 "tool_call_id": "tc_123",
                 "arguments": {
-                    "operation": "run",
-                    "hardware": "cpu-basic",
+                    "operation": "scheduled run",
+                    "hardware": "future-h200x8",
                     "token": "[REDACTED]",
                 },
-                "risk": "medium",
-                "side_effects": ["remote_compute"],
-                "rollback": "Cancel the job.",
-                "budget_impact": "May incur CPU compute costs.",
+                "risk": "unknown",
+                "side_effects": [
+                    "Starts or schedules a Hugging Face compute job."
+                ],
+                "rollback": "Cancel the job or delete the scheduled job.",
+                "budget_impact": (
+                    "Unknown HF compute spend; hardware is missing or not "
+                    "recognized in the local flavor list."
+                ),
                 "credential_usage": ["hf_token"],
-                "reason": "CPU job launch requires approval.",
+                "reason": (
+                    "Hugging Face job launch risk: unknown; spend=high; "
+                    "duration=30m (default_timeout); scheduled recurrence "
+                    "requires approval; uncertainty=default_duration, "
+                    "unknown_hardware, recurrence_multiplier_unknown."
+                ),
             }
         ]
+        assert record.pending_approval_refs_redaction_status == "redacted"
 
         assert await manager.submit_approval(
             session_id,
@@ -537,7 +558,9 @@ def test_pending_approval_is_included_in_session_info(manager):
         id="tc_123",
         function=SimpleNamespace(
             name="hf_jobs",
-            arguments=json.dumps({"operation": "run", "hardware": "cpu-basic"}),
+            arguments=json.dumps(
+                {"operation": "run", "hardware": "a100x8", "timeout": "2h"}
+            ),
         ),
     )
     fake_session = SimpleNamespace(
@@ -547,12 +570,17 @@ def test_pending_approval_is_included_in_session_info(manager):
             "tool_calls": [tool_call],
             "policy": {
                 "tc_123": {
-                    "risk": "medium",
-                    "side_effects": ["remote_compute"],
-                    "rollback": "Cancel the job.",
-                    "budget_impact": "May incur CPU compute costs.",
+                    "risk": "critical",
+                    "side_effects": [
+                        "Starts or schedules a Hugging Face compute job."
+                    ],
+                    "rollback": "Cancel the job or delete the scheduled job.",
+                    "budget_impact": "Estimated a100x8 multi_gpu spend: about $40.00 for 2h.",
                     "credential_usage": ["hf_token"],
-                    "reason": "CPU job launch requires approval.",
+                    "reason": (
+                        "Hugging Face job launch risk: multi_gpu; spend=high; "
+                        "duration=2h (timeout)."
+                    ),
                 }
             },
         },
@@ -573,13 +601,18 @@ def test_pending_approval_is_included_in_session_info(manager):
         {
             "tool": "hf_jobs",
             "tool_call_id": "tc_123",
-            "arguments": {"operation": "run", "hardware": "cpu-basic"},
-            "risk": "medium",
-            "side_effects": ["remote_compute"],
-            "rollback": "Cancel the job.",
-            "budget_impact": "May incur CPU compute costs.",
+            "arguments": {"operation": "run", "hardware": "a100x8", "timeout": "2h"},
+            "risk": "critical",
+            "side_effects": [
+                "Starts or schedules a Hugging Face compute job."
+            ],
+            "rollback": "Cancel the job or delete the scheduled job.",
+            "budget_impact": "Estimated a100x8 multi_gpu spend: about $40.00 for 2h.",
             "credential_usage": ["hf_token"],
-            "reason": "CPU job launch requires approval.",
+            "reason": (
+                "Hugging Face job launch risk: multi_gpu; spend=high; "
+                "duration=2h (timeout)."
+            ),
         }
     ]
 

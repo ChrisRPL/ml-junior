@@ -25,6 +25,18 @@ verifier status, confidence, and blockers.
   and browser-local caches.
 - `GET /api/session/{session_id}/workflow` returns a read-only workflow
   projection from persisted event, session, and operation records.
+- `GET /api/session/{session_id}/artifacts` returns read-only artifact refs
+  projected from persisted `artifact_ref.recorded` events for artifact
+  navigation surfaces.
+- `GET /api/session/{session_id}/artifacts/{artifact_id}` returns the latest
+  projected artifact ref for one artifact id from persisted events. It can feed
+  artifact drill-in views before blob inspection/download workflows ship.
+- `GET /api/session/{session_id}/runs` returns read-only experiment runs
+  projected from persisted `experiment.run_recorded` events. It can feed run
+  lists before a standalone experiment board ships.
+- `GET /api/session/{session_id}/runs/{run_id}` returns the latest projected
+  detail for one run id from persisted events. It can feed drill-in views before
+  comparison and fork workflows ship.
 - `GET /api/flows` and `GET /api/flows/{template_id}/preview` expose read-only
   built-in flow metadata for UI preview.
 - The project dashboard includes read-only panels for flow definitions,

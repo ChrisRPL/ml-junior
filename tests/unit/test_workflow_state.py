@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from agent.core.events import AgentEvent
+from backend.assumption_ledger import ASSUMPTION_RECORDED_EVENT
 from backend.budget_ledger import (
     BUDGET_LIMIT_RECORDED_EVENT,
     BUDGET_USAGE_RECORDED_EVENT,
@@ -482,6 +483,45 @@ def make_decision_card_recorded_event(
     ).model_copy(update={"id": event_id or f"event-{sequence}"})
 
 
+def make_assumption_recorded_event(
+    *,
+    sequence: int,
+    assumption_id: str = "assumption-1",
+    title: str = "Dataset label stability",
+    session_id: str = "session-a",
+    event_id: str | None = None,
+    source_event_sequence: int | None = None,
+) -> AgentEvent:
+    return make_event(
+        sequence=sequence,
+        event_type=ASSUMPTION_RECORDED_EVENT,
+        session_id=session_id,
+        data={
+            "session_id": session_id,
+            "assumption_id": assumption_id,
+            "source_event_sequence": source_event_sequence or sequence,
+            "title": title,
+            "statement": "Validation labels are stable for this split.",
+            "status": "open",
+            "confidence": "unknown",
+            "phase_id": "phase-data",
+            "run_id": "run-1",
+            "decision_ids": ["decision-1"],
+            "evidence_ids": ["evidence-1"],
+            "claim_ids": ["claim-1"],
+            "artifact_ids": ["artifact-1"],
+            "proof_bundle_ids": ["proof-1"],
+            "rationale": "Dataset card documents the label policy.",
+            "validation_notes": "Needs another check after data refresh.",
+            "metadata": {"reviewed_by": "synthetic-fixture"},
+            "privacy_class": "private",
+            "redaction_status": "none",
+            "created_at": f"2026-01-02T03:04:{sequence:02d}+00:00",
+            "updated_at": f"2026-01-02T03:05:{sequence:02d}+00:00",
+        },
+    ).model_copy(update={"id": event_id or f"event-{sequence}"})
+
+
 def make_proof_bundle_recorded_event(
     *,
     sequence: int,
@@ -524,6 +564,8 @@ def _summary_item_id(item: dict) -> str | None:
         return item.get("verdict_id")
     if "decision_id" in item:
         return item.get("decision_id")
+    if "assumption_id" in item:
+        return item.get("assumption_id")
     if "proof_bundle_id" in item:
         return item.get("proof_bundle_id")
     if "link_id" in item:
@@ -789,6 +831,7 @@ def test_empty_workflow_state_preserves_evidence_summary_placeholder():
         "items": [],
     }
     assert "decision_card_count" not in state.evidence_summary
+    assert "assumption_count" not in state.evidence_summary
     assert "proof_bundle_count" not in state.evidence_summary
 
 
@@ -1081,6 +1124,44 @@ def test_decision_card_and_proof_bundle_project_into_evidence_summary():
     assert state.evidence_summary["items"][0]["proof_bundle_ids"] == ["proof-metric"]
     assert state.evidence_summary["items"][1]["title"] == "Evaluation metric proof"
     assert state.evidence_summary["items"][1]["decision_ids"] == ["decision-metric"]
+
+
+def test_assumption_records_project_into_evidence_summary():
+    state = build_workflow_state(
+        session_id="session-a",
+        events=[
+            make_assumption_recorded_event(
+                sequence=3,
+                assumption_id="assumption-later",
+                title="Later assumption",
+            ),
+            make_assumption_recorded_event(
+                sequence=1,
+                assumption_id="assumption-labels",
+                title="Dataset label stability",
+            ),
+            make_assumption_recorded_event(
+                sequence=2,
+                assumption_id="assumption-other",
+                session_id="session-b",
+            ),
+        ],
+    )
+
+    assert state.evidence_summary["source"] == "event"
+    assert state.evidence_summary["status"] == "available"
+    assert state.evidence_summary["assumption_count"] == 2
+    assert state.evidence_summary["evidence_count"] == 0
+    assert state.evidence_summary["decision_card_count"] == 0
+    assert [
+        _summary_item_id(item)
+        for item in state.evidence_summary["items"]
+    ] == ["assumption-labels", "assumption-later"]
+    first = state.evidence_summary["items"][0]
+    assert first["title"] == "Dataset label stability"
+    assert first["statement"] == "Validation labels are stable for this split."
+    assert first["status"] == "open"
+    assert first["proof_bundle_ids"] == ["proof-1"]
 
 
 def test_verifier_completed_projects_into_evidence_summary():

@@ -100,6 +100,52 @@ Target behavior:
 - LLM/tool retry state should become observable enough for deterministic
   replay and debugging.
 
+## Policy Approval Audit Contracts
+
+Current behavior:
+
+- Responsibilities: provide inert policy, approval, and audit contracts for
+  planned trust-sensitive commands before those commands are implemented.
+- Inputs: command name and arguments for `/share-traces`, `/ledger verify`, and
+  `/proof bundle`.
+- Outputs: `PolicyAuditContract` records with risk, approval requirement,
+  approval title/body, side effects, rollback, budget impact, credential usage,
+  privacy and visibility defaults, audit event type names, required audit
+  fields, redaction requirements, preconditions, and notes.
+- Event contracts: `policy.audit_intent_recorded` and
+  `policy.audit_result_recorded` payloads are closed schemas only; they validate
+  the future durable audit records before any writer or command dispatcher
+  exists.
+- Ledger helpers: `backend.policy_audit_ledger` owns strict intent/result
+  records, payload helpers, redacted payload helpers, event-to-record
+  validation, pure session projections, duplicate rejection, result-to-intent
+  correlation, and pending intent tracking.
+- Builder helpers: pure policy audit builders create validated intent/result
+  records and redacted event draft payloads from a `PolicyAuditContract` plus
+  explicit caller metadata. They apply stage-specific required-field gates,
+  public trace acknowledgement/redaction checks, protected-field rejection, and
+  result-to-intent correlation.
+- Envelope helpers: pure `MLJ-TPS-014d` helpers wrap already-built, validated
+  policy audit drafts into validated, redacted `AgentEvent` envelopes. Inputs
+  are policy audit drafts, not command args or live contracts; unknown event
+  types fail closed.
+- Persistence: none. The contracts do not dispatch commands, mutate Hub
+  visibility, verify ledgers, create proof bundles, sign/export artifacts, or
+  emit, append, or write audit events. The `MLJ-TPS-014d` helpers return
+  envelopes only, with no durable writes or runtime side effects.
+- Failure modes: unknown commands and unsupported trust-sensitive arguments
+  raise `PolicyAuditContractError` instead of guessing a policy.
+- Tests: `tests/unit/test_policy_audit_contracts.py`,
+  `tests/unit/test_policy_audit_ledger.py`, `tests/unit/test_agent_events.py`,
+  `tests/unit/test_policy_engine.py`, and
+  `tests/unit/test_tool_router_approval.py`.
+
+Target behavior:
+
+- `/share-traces`, `/ledger verify`, `/proof bundle`, and future export
+  commands should route through these contracts plus durable approval/audit
+  event persistence before any mutating or trust-signaling behavior lands.
+
 ## Tool Router And Policy Engine
 
 Current behavior:
@@ -203,8 +249,9 @@ Current behavior:
   Hub URLs, sandbox refs, remote URLs, and event pointers belong in locator or
   compatibility fields. A pure artifact producer adapter can build
   `ArtifactRefRecord` from explicit caller-supplied producer metadata without
-  inspecting files or tool output text. Runtime tools do not write to this
-  store yet.
+  inspecting files or tool output text. The backend exposes a read-only
+  session-scoped artifact index from persisted `artifact_ref.recorded` events.
+  Runtime tools do not write to this store yet.
 - Policy metadata helpers: `PolicyEngine` uses the pure HF compute risk helper
   to estimate local risk/spend metadata for known `jobs_tool.py` hardware
   flavors, including scheduled and unknown hardware uncertainty. It enriches
@@ -218,6 +265,7 @@ Current behavior:
   `tests/unit/test_hf_compute_risk.py`,
   `tests/unit/test_artifact_producers.py`,
   `tests/unit/test_tool_router_approval.py`,
+  `tests/unit/test_backend_artifact_index.py`,
   `tests/unit/test_job_artifact_refs.py`,
   `tests/unit/test_experiment_ledger.py`, and workflow/progress tests that
   project job refs.
@@ -269,7 +317,8 @@ Current behavior:
 
 - Responsibilities: describe configured local Ollama/llama.cpp endpoints,
   build intended `/v1/models` probe descriptors, classify caller-supplied probe
-  results, and build planned doctor report objects.
+  results, build doctor report objects, and render the read-only CLI
+  `/doctor local-inference` output.
 - Inputs: local runtime config/env metadata, expected local model id, and
   caller-supplied classifications or errors.
 - Outputs: pure runtime descriptors, probe descriptors/classifications, and
@@ -279,14 +328,212 @@ Current behavior:
 - Failure modes: invalid config returns config-error descriptors; missing or
   malformed caller-supplied payloads become report statuses and hints.
 - Tests: `tests/unit/test_local_inference.py`,
-  `tests/unit/test_local_inference_doctor.py`, and
-  `tests/unit/test_llm_params.py`.
+  `tests/unit/test_local_inference_doctor.py`,
+  `tests/unit/test_doctor_commands.py`, and `tests/unit/test_llm_params.py`.
 
 Target behavior:
 
-- `/doctor local-inference` can consume these pure reports later, but the
-  command, daemon probes, provider calls, model pulls, and UI/routes are not
-  implemented.
+- Daemon probes, provider calls, model pulls, and UI/routes are not implemented.
+  If added later, they must remain explicit and no-network in the default test
+  gate by accepting fake-server or caller-supplied responses.
+
+## CLI Index Commands
+
+Current behavior:
+
+- Responsibilities: render read-only `/runs [filter]`, `/run show <id>`,
+  `/metrics [run]`, and `/artifacts [filter]` output from the active local CLI
+  session's recorded `experiment.run_recorded` and `artifact_ref.recorded`
+  events. When explicitly opted in with `MLJ_BACKEND_BASE_URL` and
+  `MLJ_BACKEND_SESSION_ID`, the same commands read backend session index routes
+  instead of the in-memory session log.
+- Inputs: current session id, in-memory logged events, event metadata, optional
+  case-insensitive filter string, or explicit backend base URL/session id/env
+  auth settings for backend mode.
+- Outputs: plain terminal text listing experiment runs, one run detail, metric
+  rows, or artifact refs.
+- Persistence: none. The helpers do not append events, inspect artifact blobs,
+  submit messages, replay sessions, or contact providers. Backend mode reads
+  only the existing durable run/artifact JSON routes.
+- Failure modes: no active local session returns a no-active-session message;
+  incomplete backend env, backend auth failures, 404s, timeouts, invalid JSON,
+  or malformed recorded event data report renderer errors instead of mutating
+  state.
+- Tests: `tests/unit/test_cli_index_commands.py`,
+  `tests/unit/test_backend_index_client.py`,
+  `tests/unit/test_cli_command_registry.py`, and
+  `tests/unit/test_cli_command_completions.py`.
+
+Target behavior:
+
+- Run comparison, metric ingestion, artifact inspection, and TUI panes remain
+  separate slices.
+
+## CLI Evidence Summary
+
+Current behavior:
+
+- Responsibilities: render read-only `/evidence [query]` output from the active
+  local CLI session's existing `WorkflowState.evidence_summary` projection.
+- Inputs: current session id, in-memory logged events, event metadata, and an
+  optional case-insensitive filter string. The renderer only reconstructs event
+  types that already feed `evidence_summary`: artifact refs, standalone metrics,
+  log refs, explicit evidence items, claim links, decision cards, proof bundles,
+  and verifier verdicts.
+- Outputs: plain terminal text with evidence summary counts and filtered rows.
+- Persistence: none. The command does not read durable stores, append events,
+  create/link evidence, verify claims, sign/export proof bundles, inspect
+  artifact blobs or log bodies, ingest metrics, or contact providers.
+- Failure modes: no active session returns a no-active-session message; empty
+  projection returns an empty state; malformed recorded evidence events report a
+  renderer error instead of mutating state.
+- Tests: `tests/unit/test_cli_evidence_commands.py`,
+  `tests/unit/test_cli_command_registry.py`, and
+  `tests/unit/test_cli_command_completions.py`.
+
+Target behavior:
+
+- Backend-backed evidence search, claim verification, evidence creation,
+  decision/proof editing, and TUI panes remain separate slices.
+
+## CLI Decisions Index
+
+Current behavior:
+
+- Responsibilities: render read-only `/decisions [query]` output from the
+  active local CLI session's existing `WorkflowState.evidence_summary`
+  projection.
+- Inputs: current session id, in-memory logged events, event metadata, and an
+  optional case-insensitive filter string. The renderer shows only decision-card
+  rows that are already present in the projection.
+- Outputs: plain terminal text with a decision count and filtered rows including
+  decision id, status, source event sequence, linked evidence/claims/artifacts/
+  proof bundles, title, decision, and rationale when present.
+- Persistence: none. The command does not read durable stores, append events,
+  create/edit decisions, infer assumptions, sign/export proof bundles, inspect
+  artifact blobs or log bodies, or contact providers.
+- Failure modes: no active session returns a no-active-session message; empty
+  projection returns an empty state; malformed recorded decision events report a
+  renderer error instead of mutating state.
+- Tests: `tests/unit/test_cli_evidence_commands.py`,
+  `tests/unit/test_cli_command_registry.py`, and
+  `tests/unit/test_cli_command_completions.py`.
+
+Target behavior:
+
+- Durable decision editing, proof signing/export, and TUI
+  decision panes remain separate slices.
+
+## CLI Assumptions Index
+
+Current behavior:
+
+- Responsibilities: render read-only `/assumptions [query]` output from the
+  active local CLI session's existing `WorkflowState.evidence_summary`
+  projection.
+- Inputs: current session id, in-memory logged events, event metadata, and an
+  optional case-insensitive filter string. The renderer shows only assumption
+  rows that are already present in the projection.
+- Outputs: plain terminal text with an assumption count and filtered rows
+  including assumption id, status, confidence, source event sequence,
+  phase/run ids, linked decisions/evidence/claims/artifacts/proof bundles,
+  title, statement, rationale, and validation notes when present.
+- Persistence: none. The command does not read durable stores, append events,
+  create/edit assumptions, infer assumptions from chat, sign/export proof
+  bundles, inspect artifact blobs or log bodies, or contact providers.
+- Failure modes: no active session returns a no-active-session message; empty
+  projection returns an empty state; malformed recorded assumption events report
+  a renderer error instead of mutating state.
+- Tests: `tests/unit/test_cli_evidence_commands.py`,
+  `tests/unit/test_cli_command_registry.py`, and
+  `tests/unit/test_cli_command_completions.py`.
+
+Target behavior:
+
+- Durable assumption creation/editing, validation workflows, TUI assumption
+  panes, and export/signing integration remain separate slices.
+
+## CLI Ledger Event Index
+
+Current behavior:
+
+- Responsibilities: render read-only `/ledger [query]` output from the active
+  local CLI session's redacted `AgentEvent` envelopes.
+- Inputs: current session id, in-memory logged events, event metadata, and an
+  optional case-insensitive filter string over redacted visible metadata.
+- Outputs: plain terminal text with an event count and filtered rows including
+  sequence, event id, event type, timestamp, schema version, redaction status,
+  safe top-level refs, and sorted top-level payload keys.
+- Persistence: none. The command does not read durable stores, append events,
+  verify ledgers, sign/export proof bundles, display full payload values,
+  inspect artifact blobs or log bodies, or contact providers.
+- Failure modes: no active session returns a no-active-session message; empty
+  session logs return an empty state; malformed known event payloads report a
+  renderer error instead of mutating state.
+- Tests: `tests/unit/test_cli_ledger_commands.py`,
+  `tests/unit/test_cli_command_registry.py`, and
+  `tests/unit/test_cli_command_completions.py`.
+
+Target behavior:
+
+- Durable ledger browsing, `/ledger verify [bundle]`, audit export, and TUI
+  ledger panes remain separate slices.
+
+## Assumption Ledger
+
+Current behavior:
+
+- Responsibilities: validate and project explicit, caller-supplied
+  `assumption.recorded` events.
+- Inputs: event-backed `AssumptionRecord` payloads with session id, assumption
+  id, title, statement, status, confidence, optional run/phase refs,
+  evidence/claim/decision/artifact/proof refs, rationale, validation notes,
+  privacy class, and redaction status.
+- Outputs: closed-schema event payloads and read-only `WorkflowState`
+  `evidence_summary` rows with `assumption_count`.
+- Persistence: none beyond the generic event surfaces that may carry these
+  events. There are no runtime producers, no automatic chat inference, no
+  decision/proof cross-reference validation, and no export behavior in this
+  slice.
+- Failure modes: malformed payloads fail `AgentEvent` validation; projection
+  rejects duplicate `assumption_id` values and session mismatches.
+- Tests: `tests/unit/test_assumption_ledger.py`,
+  `tests/unit/test_agent_events.py`, `tests/unit/test_workflow_state.py`, and
+  `tests/unit/test_cli_evidence_commands.py`.
+
+Target behavior:
+
+- TUI assumption panes, assumption producers, validation workflows, and
+  export/signing integration remain separate slices.
+
+## CLI Handoff Preview
+
+Current behavior:
+
+- Responsibilities: render read-only `/handoff preview` output from the active
+  local CLI session by combining `WorkflowState` projection with the pure
+  handoff summary generator.
+- Inputs: current session id, in-memory logged events, and event metadata. Extra
+  arguments are rejected with usage text so the preview cannot be mistaken for
+  path/export behavior.
+- Outputs: plain terminal text with session/status/phase/next-action scalars,
+  counts, and compact sections for completed phases, blockers, pending
+  approvals, active jobs, decisions, evidence, artifacts, failures, and risks.
+- Persistence: none. The command does not append `handoff.summary_created`,
+  write files, create checkpoints/forks, read durable stores, call backend
+  routes, invoke LLM summarization, inspect artifact blobs or log bodies, start
+  workflows, or contact providers.
+- Failure modes: no active session returns a no-active-session message; empty
+  projection renders stale/empty sections; malformed recorded events report a
+  renderer error instead of mutating state.
+- Tests: `tests/unit/test_cli_handoff_commands.py`,
+  `tests/unit/test_cli_command_registry.py`, and
+  `tests/unit/test_cli_command_completions.py`.
+
+Target behavior:
+
+- Mutating `/handoff [path]`, durable handoff creation, file export, backend
+  handoff routes, and TUI handoff panes remain separate slices.
 
 ## Backend API, SSE, And Events
 
@@ -294,8 +541,9 @@ Current behavior:
 
 - Responsibilities: authenticate routes, create/list/delete sessions, submit
   chat/approval operations, stream SSE, replay events by sequence cursor, expose
-  redacted messages, operations, workflow state, health, model config, quotas,
-  and flow previews.
+  redacted messages, operations, workflow state, artifact refs and artifact
+  detail, experiment run refs and run detail, health, model config, quotas, and
+  flow previews.
 - Inputs: HTTP requests, bearer token or `hf_access_token` cookie, JSON bodies,
   SSE cursor query/header, and current session owner.
 - Outputs: REST JSON, SSE `data:` messages in legacy `{event_type, data}` shape,
@@ -307,6 +555,9 @@ Current behavior:
   is process health only; `/api/health/llm` depends on provider credentials and
   network.
 - Tests: `tests/unit/test_backend_session_sse.py`,
+  `tests/unit/test_backend_artifact_index.py`,
+  `tests/unit/test_backend_run_index.py`,
+  `tests/unit/test_backend_run_detail.py`,
   `tests/unit/test_backend_operation_routes.py`,
   `tests/unit/test_event_store.py`, and
   `tests/unit/test_user_quotas.py`.
